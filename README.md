@@ -18,8 +18,9 @@ A lightweight DNS proxy server written in Go that forwards queries to upstream D
 
 ## Logging Features
 
-The DNS server provides detailed logging for every request and response:
+The DNS server provides detailed logging for every request and response with **unique request tracking**:
 
+- **Request UUID**: Each DNS request gets a unique 8-character identifier for easy correlation
 - **Request Logging**: Client IP, query name, query type, request ID
 - **Upstream Tracking**: Which upstream server was used for each query
 - **Performance Metrics**: Response times (RTT and total duration)
@@ -29,12 +30,38 @@ The DNS server provides detailed logging for every request and response:
 
 ### Log Format Examples
 
+Each request is tracked with a unique UUID that appears in all related log entries:
+
 ```
-[REQUEST] Client: 192.168.1.100:12345 | Query: google.com. | Type: A | ID: 12345
-[UPSTREAM] Trying upstream 1/4: 8.8.8.8:53
-[RESPONSE] Success | Upstream: 8.8.8.8:53 | RTT: 45ms | Total: 46ms | Answers: 6 | Rcode: NOERROR | ID: 12345
-[ANSWER] google.com. 300 IN A 172.217.164.110
+[REQUEST] UUID: 815760ac | Client: 192.168.1.100:12345 | Query: google.com. | Type: A | ID: 12345
+[UPSTREAM] UUID: 815760ac | Trying upstream 1/4: 8.8.8.8:53
+[RESPONSE] UUID: 815760ac | Success | Upstream: 8.8.8.8:53 | RTT: 45ms | Total: 46ms | Answers: 6 | Rcode: NOERROR | ID: 12345
+[ANSWER] UUID: 815760ac | google.com. 300 IN A 172.217.164.110
 ```
+
+**Multiple record responses:**
+```
+[REQUEST] UUID: b4749e73 | Client: 192.168.1.100:12346 | Query: stackoverflow.com. | Type: TXT | ID: 9539
+[UPSTREAM] UUID: b4749e73 | Trying upstream 1/4: 8.8.8.8:53
+[RESPONSE] UUID: b4749e73 | Success | Upstream: 8.8.8.8:53 | RTT: 60ms | Total: 61ms | Answers: 15 | Rcode: NOERROR | ID: 9539
+[ANSWER] UUID: b4749e73 | stackoverflow.com. 300 IN TXT "google-site-verification=..."
+[ANSWER] UUID: b4749e73 | stackoverflow.com. 300 IN TXT "v=spf1 ip4:198.252.206.71..."
+... (13 more TXT records with same UUID)
+```
+
+**Error responses:**
+```
+[REQUEST] UUID: df61b1b0 | Client: 192.168.1.100:12347 | Query: nonexistent.invalid. | Type: A | ID: 22938
+[UPSTREAM] UUID: df61b1b0 | Trying upstream 1/4: 8.8.8.8:53
+[RESPONSE] UUID: df61b1b0 | Success | Upstream: 8.8.8.8:53 | RTT: 42ms | Total: 42ms | Answers: 0 | Rcode: NXDOMAIN | ID: 22938
+```
+
+### Request Correlation Benefits
+
+- **Easy Filtering**: `grep "UUID: 815760ac" logs/dns-server.log` shows all entries for one request
+- **Performance Analysis**: Track end-to-end timing for specific queries
+- **Debugging**: Follow the complete lifecycle of problematic requests
+- **Monitoring**: Identify patterns in failed requests or slow responses
 
 ## Usage
 

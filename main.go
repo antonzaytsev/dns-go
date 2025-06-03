@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/rand"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -61,18 +63,26 @@ func setupLogging(logFile string) (*os.File, error) {
 	return file, nil
 }
 
+// generateRequestUUID creates a unique identifier for each request
+func generateRequestUUID() string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	return fmt.Sprintf("%x", b)
+}
+
 // handleDNSRequest processes incoming DNS queries
 func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	start := time.Now()
 	clientAddr := w.RemoteAddr().String()
+	requestUUID := generateRequestUUID()
 
 	// Log the incoming query
 	if len(r.Question) > 0 {
 		question := r.Question[0]
-		log.Printf("[REQUEST] Client: %s | Query: %s | Type: %s | ID: %d",
-			clientAddr, question.Name, dns.TypeToString[question.Qtype], r.Id)
+		log.Printf("[REQUEST] UUID: %s | Client: %s | Query: %s | Type: %s | ID: %d",
+			requestUUID, clientAddr, question.Name, dns.TypeToString[question.Qtype], r.Id)
 	} else {
-		log.Printf("[REQUEST] Client: %s | No questions in query | ID: %d", clientAddr, r.Id)
+		log.Printf("[REQUEST] UUID: %s | Client: %s | No questions in query | ID: %d", requestUUID, clientAddr, r.Id)
 		// Return FORMERR for malformed queries
 		msg := &dns.Msg{}
 		msg.SetRcode(r, dns.RcodeFormatError)
@@ -82,14 +92,14 @@ func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 	// Try each upstream DNS server until we get a response
 	for i, upstream := range s.config.UpstreamDNS {
-		log.Printf("[UPSTREAM] Trying upstream %d/%d: %s", i+1, len(s.config.UpstreamDNS), upstream)
+		log.Printf("[UPSTREAM] UUID: %s | Trying upstream %d/%d: %s", requestUUID, i+1, len(s.config.UpstreamDNS), upstream)
 
 		upstreamStart := time.Now()
 		resp, rtt, err := s.client.Exchange(r, upstream)
 		upstreamDuration := time.Since(upstreamStart)
 
 		if err != nil {
-			log.Printf("[ERROR] Upstream %s failed after %v: %v", upstream, upstreamDuration, err)
+			log.Printf("[ERROR] UUID: %s | Upstream %s failed after %v: %v", requestUUID, upstream, upstreamDuration, err)
 			continue
 		}
 
@@ -97,34 +107,34 @@ func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			totalDuration := time.Since(start)
 
 			// Log successful response details
-			log.Printf("[RESPONSE] Success | Upstream: %s | RTT: %v | Total: %v | Answers: %d | Rcode: %s | ID: %d",
-				upstream, rtt, totalDuration, len(resp.Answer), dns.RcodeToString[resp.Rcode], resp.Id)
+			log.Printf("[RESPONSE] UUID: %s | Success | Upstream: %s | RTT: %v | Total: %v | Answers: %d | Rcode: %s | ID: %d",
+				requestUUID, upstream, rtt, totalDuration, len(resp.Answer), dns.RcodeToString[resp.Rcode], resp.Id)
 
 			// Log answer records if present
 			if len(resp.Answer) > 0 {
 				for _, answer := range resp.Answer {
-					log.Printf("[ANSWER] %s", answer.String())
+					log.Printf("[ANSWER] UUID: %s | %s", requestUUID, answer.String())
 				}
 			}
 
 			// Forward the response back to the client
 			if err := w.WriteMsg(resp); err != nil {
-				log.Printf("[ERROR] Failed to write response to client %s: %v", clientAddr, err)
+				log.Printf("[ERROR] UUID: %s | Failed to write response to client %s: %v", requestUUID, clientAddr, err)
 			}
 			return
 		} else {
-			log.Printf("[WARNING] Upstream %s returned nil response after %v", upstream, upstreamDuration)
+			log.Printf("[WARNING] UUID: %s | Upstream %s returned nil response after %v", requestUUID, upstream, upstreamDuration)
 		}
 	}
 
 	// If all upstreams failed, return SERVFAIL
 	totalDuration := time.Since(start)
-	log.Printf("[FAILURE] All upstreams failed after %v | Client: %s | ID: %d", totalDuration, clientAddr, r.Id)
+	log.Printf("[FAILURE] UUID: %s | All upstreams failed after %v | Client: %s | ID: %d", requestUUID, totalDuration, clientAddr, r.Id)
 
 	msg := &dns.Msg{}
 	msg.SetRcode(r, dns.RcodeServerFailure)
 	if err := w.WriteMsg(msg); err != nil {
-		log.Printf("[ERROR] Failed to write SERVFAIL response to client %s: %v", clientAddr, err)
+		log.Printf("[ERROR] UUID: %s | Failed to write SERVFAIL response to client %s: %v", requestUUID, clientAddr, err)
 	}
 }
 
