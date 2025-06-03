@@ -1,0 +1,23 @@
+services:
+  dns-server:
+    build: .
+    container_name: dns2-server
+    ports:
+      - "53:53/udp"
+    environment:
+      # Optional: Override default settings via environment variables
+      - DNS_LISTEN=0.0.0.0
+      - DNS_PORT=53
+    command: [
+      "./dns-server",
+      "-listen", "0.0.0.0",
+      "-port", "53",
+      "-upstreams", "8.8.8.8:53,8.8.4.4:53,1.1.1.1:53,1.0.0.1:53"
+    ]
+    restart: unless-stopped
+    networks:
+      - dns-network
+
+networks:
+  dns-network:
+    driver: bridge 
