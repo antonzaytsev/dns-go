@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -13,6 +14,44 @@ import (
 
 	"github.com/miekg/dns"
 )
+
+// LogEntry represents a complete DNS request/response cycle
+type LogEntry struct {
+	Timestamp   time.Time         `json:"timestamp"`
+	UUID        string            `json:"uuid"`
+	Request     RequestInfo       `json:"request"`
+	Upstreams   []UpstreamAttempt `json:"upstreams"`
+	Response    *ResponseInfo     `json:"response,omitempty"`
+	Answers     [][]string        `json:"answers,omitempty"`
+	IPAddresses []string          `json:"ip_addresses,omitempty"`
+	Status      string            `json:"status"`
+	Duration    float64           `json:"total_duration_ms"`
+}
+
+// RequestInfo contains information about the DNS request
+type RequestInfo struct {
+	Client string `json:"client"`
+	Query  string `json:"query"`
+	Type   string `json:"type"`
+	ID     uint16 `json:"id"`
+}
+
+// UpstreamAttempt represents an attempt to query an upstream server
+type UpstreamAttempt struct {
+	Server   string   `json:"server"`
+	Attempt  int      `json:"attempt"`
+	Error    *string  `json:"error,omitempty"`
+	RTT      *float64 `json:"rtt_ms,omitempty"`
+	Duration float64  `json:"duration_ms"`
+}
+
+// ResponseInfo contains information about the successful response
+type ResponseInfo struct {
+	Upstream    string  `json:"upstream"`
+	Rcode       string  `json:"rcode"`
+	AnswerCount int     `json:"answer_count"`
+	RTT         float64 `json:"rtt_ms"`
+}
 
 // Config holds the DNS server configuration
 type Config struct {
@@ -70,72 +109,167 @@ func generateRequestUUID() string {
 	return fmt.Sprintf("%x", b)
 }
 
+// durationToMilliseconds converts time.Duration to milliseconds as float64
+func durationToMilliseconds(d time.Duration) float64 {
+	return float64(d.Nanoseconds()) / 1e6
+}
+
 // handleDNSRequest processes incoming DNS queries
 func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	start := time.Now()
 	clientAddr := w.RemoteAddr().String()
 	requestUUID := generateRequestUUID()
 
-	// Log the incoming query
-	if len(r.Question) > 0 {
-		question := r.Question[0]
-		log.Printf("[REQUEST] UUID: %s | Client: %s | Query: %s | Type: %s | ID: %d",
-			requestUUID, clientAddr, question.Name, dns.TypeToString[question.Qtype], r.Id)
-	} else {
-		log.Printf("[REQUEST] UUID: %s | Client: %s | No questions in query | ID: %d", requestUUID, clientAddr, r.Id)
-		// Return FORMERR for malformed queries
+	// Initialize log entry
+	logEntry := LogEntry{
+		Timestamp: start,
+		UUID:      requestUUID,
+		Upstreams: make([]UpstreamAttempt, 0),
+		Status:    "unknown",
+	}
+
+	// Handle malformed queries
+	if len(r.Question) == 0 {
+		logEntry.Request = RequestInfo{
+			Client: clientAddr,
+			Query:  "MALFORMED",
+			Type:   "UNKNOWN",
+			ID:     r.Id,
+		}
+		logEntry.Status = "malformed_query"
+		logEntry.Duration = durationToMilliseconds(time.Since(start))
+
+		// Log and return error
+		s.logJSON(logEntry)
 		msg := &dns.Msg{}
 		msg.SetRcode(r, dns.RcodeFormatError)
 		w.WriteMsg(msg)
 		return
 	}
 
+	// Set request information
+	question := r.Question[0]
+	logEntry.Request = RequestInfo{
+		Client: clientAddr,
+		Query:  question.Name,
+		Type:   dns.TypeToString[question.Qtype],
+		ID:     r.Id,
+	}
+
 	// Try each upstream DNS server until we get a response
 	for i, upstream := range s.config.UpstreamDNS {
-		log.Printf("[UPSTREAM] UUID: %s | Trying upstream %d/%d: %s", requestUUID, i+1, len(s.config.UpstreamDNS), upstream)
-
 		upstreamStart := time.Now()
+
 		resp, rtt, err := s.client.Exchange(r, upstream)
 		upstreamDuration := time.Since(upstreamStart)
 
+		// Record upstream attempt
+		attempt := UpstreamAttempt{
+			Server:   upstream,
+			Attempt:  i + 1,
+			Duration: durationToMilliseconds(upstreamDuration),
+		}
+
 		if err != nil {
-			log.Printf("[ERROR] UUID: %s | Upstream %s failed after %v: %v", requestUUID, upstream, upstreamDuration, err)
+			errStr := err.Error()
+			attempt.Error = &errStr
+			logEntry.Upstreams = append(logEntry.Upstreams, attempt)
 			continue
 		}
 
 		if resp != nil {
-			totalDuration := time.Since(start)
+			rttStr := durationToMilliseconds(rtt)
+			attempt.RTT = &rttStr
+			logEntry.Upstreams = append(logEntry.Upstreams, attempt)
 
-			// Log successful response details
-			log.Printf("[RESPONSE] UUID: %s | Success | Upstream: %s | RTT: %v | Total: %v | Answers: %d | Rcode: %s | ID: %d",
-				requestUUID, upstream, rtt, totalDuration, len(resp.Answer), dns.RcodeToString[resp.Rcode], resp.Id)
+			// Set response information
+			logEntry.Response = &ResponseInfo{
+				Upstream:    upstream,
+				Rcode:       dns.RcodeToString[resp.Rcode],
+				AnswerCount: len(resp.Answer),
+				RTT:         rttStr,
+			}
 
-			// Log answer records if present
-			if len(resp.Answer) > 0 {
-				for _, answer := range resp.Answer {
-					log.Printf("[ANSWER] UUID: %s | %s", requestUUID, answer.String())
+			// Collect answer records
+			logEntry.Answers = make([][]string, len(resp.Answer))
+			for j, answer := range resp.Answer {
+				// Parse the answer record into components
+				answerStr := answer.String()
+				parts := strings.Fields(answerStr)
+
+				// Ensure we have at least the basic components
+				if len(parts) >= 4 {
+					logEntry.Answers[j] = parts
+				} else {
+					// Fallback to the original string as a single element
+					logEntry.Answers[j] = []string{answerStr}
 				}
 			}
 
+			// Collect IP addresses from A and AAAA records
+			logEntry.IPAddresses = make([]string, 0)
+			for _, answer := range resp.Answer {
+				switch rr := answer.(type) {
+				case *dns.A:
+					logEntry.IPAddresses = append(logEntry.IPAddresses, rr.A.String())
+				case *dns.AAAA:
+					logEntry.IPAddresses = append(logEntry.IPAddresses, rr.AAAA.String())
+				}
+			}
+
+			logEntry.Status = "success"
+			logEntry.Duration = durationToMilliseconds(time.Since(start))
+
+			// Log successful response
+			s.logJSON(logEntry)
+
 			// Forward the response back to the client
 			if err := w.WriteMsg(resp); err != nil {
-				log.Printf("[ERROR] UUID: %s | Failed to write response to client %s: %v", requestUUID, clientAddr, err)
+				// Log write error separately as it's after the main request processing
+				errorLog := map[string]interface{}{
+					"timestamp": time.Now(),
+					"uuid":      requestUUID,
+					"error":     "failed_to_write_response",
+					"message":   err.Error(),
+					"client":    clientAddr,
+				}
+				s.logJSON(errorLog)
 			}
 			return
 		} else {
-			log.Printf("[WARNING] UUID: %s | Upstream %s returned nil response after %v", requestUUID, upstream, upstreamDuration)
+			logEntry.Upstreams = append(logEntry.Upstreams, attempt)
 		}
 	}
 
 	// If all upstreams failed, return SERVFAIL
-	totalDuration := time.Since(start)
-	log.Printf("[FAILURE] UUID: %s | All upstreams failed after %v | Client: %s | ID: %d", requestUUID, totalDuration, clientAddr, r.Id)
+	logEntry.Status = "all_upstreams_failed"
+	logEntry.Duration = durationToMilliseconds(time.Since(start))
+
+	s.logJSON(logEntry)
 
 	msg := &dns.Msg{}
 	msg.SetRcode(r, dns.RcodeServerFailure)
 	if err := w.WriteMsg(msg); err != nil {
-		log.Printf("[ERROR] UUID: %s | Failed to write SERVFAIL response to client %s: %v", requestUUID, clientAddr, err)
+		// Log write error separately
+		errorLog := map[string]interface{}{
+			"timestamp": time.Now(),
+			"uuid":      requestUUID,
+			"error":     "failed_to_write_servfail",
+			"message":   err.Error(),
+			"client":    clientAddr,
+		}
+		s.logJSON(errorLog)
 	}
+}
+
+// logJSON outputs a structured log entry as JSON
+func (s *DNSServer) logJSON(entry interface{}) {
+	jsonBytes, err := json.Marshal(entry)
+	if err != nil {
+		log.Printf("Error marshaling log entry: %v", err)
+		return
+	}
+	log.Println(string(jsonBytes))
 }
 
 // Start begins the DNS server

@@ -18,50 +18,218 @@ A lightweight DNS proxy server written in Go that forwards queries to upstream D
 
 ## Logging Features
 
-The DNS server provides detailed logging for every request and response with **unique request tracking**:
+The DNS server provides **structured JSON logging** for every request and response with **unique request tracking**:
 
 - **Request UUID**: Each DNS request gets a unique 8-character identifier for easy correlation
-- **Request Logging**: Client IP, query name, query type, request ID
-- **Upstream Tracking**: Which upstream server was used for each query
-- **Performance Metrics**: Response times (RTT and total duration)
-- **Response Details**: Number of answers, response codes, individual answer records
-- **Error Handling**: Failed upstream attempts and timeout logging
+- **Structured JSON**: All request information consolidated into a single JSON object
+- **Complete Lifecycle**: Request, upstream attempts, response, and answers in one log entry
+- **Performance Metrics**: Response times (RTT and total duration) for each upstream attempt
+- **Error Handling**: Failed upstream attempts and timeout logging within the same JSON structure
+- **Easy Parsing**: JSON format perfect for log aggregation tools (ELK stack, Loki, etc.)
 - **Dual Output**: Logs to both console and file simultaneously (when file logging enabled)
 
-### Log Format Examples
+### JSON Log Structure
 
-Each request is tracked with a unique UUID that appears in all related log entries:
+Each DNS request produces a single comprehensive JSON log entry:
 
-```
-[REQUEST] UUID: 815760ac | Client: 192.168.1.100:12345 | Query: google.com. | Type: A | ID: 12345
-[UPSTREAM] UUID: 815760ac | Trying upstream 1/4: 8.8.8.8:53
-[RESPONSE] UUID: 815760ac | Success | Upstream: 8.8.8.8:53 | RTT: 45ms | Total: 46ms | Answers: 6 | Rcode: NOERROR | ID: 12345
-[ANSWER] UUID: 815760ac | google.com. 300 IN A 172.217.164.110
+```json
+{
+  "timestamp": "2025-06-03T10:40:38.623412391Z",
+  "uuid": "cd1e2dda",
+  "request": {
+    "client": "192.168.148.1:39729",
+    "query": "google.com.",
+    "type": "A",
+    "id": 48130
+  },
+  "upstreams": [
+    {
+      "server": "8.8.8.8:53",
+      "attempt": 1,
+      "rtt_ms": 43.891259,
+      "duration_ms": 44.03878
+    }
+  ],
+  "response": {
+    "upstream": "8.8.8.8:53",
+    "rcode": "NOERROR",
+    "answer_count": 6,
+    "rtt_ms": 43.891259
+  },
+  "answers": [
+    ["google.com.", "181", "IN", "A", "173.194.222.139"],
+    ["google.com.", "181", "IN", "A", "173.194.222.113"],
+    ["google.com.", "181", "IN", "A", "173.194.222.138"],
+    ["google.com.", "181", "IN", "A", "173.194.222.100"],
+    ["google.com.", "181", "IN", "A", "173.194.222.101"],
+    ["google.com.", "181", "IN", "A", "173.194.222.102"]
+  ],
+  "ip_addresses": [
+    "173.194.222.139",
+    "173.194.222.113",
+    "173.194.222.138",
+    "173.194.222.100",
+    "173.194.222.101",
+    "173.194.222.102"
+  ],
+  "status": "success",
+  "total_duration_ms": 44.078161
+}
 ```
 
-**Multiple record responses:**
-```
-[REQUEST] UUID: b4749e73 | Client: 192.168.1.100:12346 | Query: stackoverflow.com. | Type: TXT | ID: 9539
-[UPSTREAM] UUID: b4749e73 | Trying upstream 1/4: 8.8.8.8:53
-[RESPONSE] UUID: b4749e73 | Success | Upstream: 8.8.8.8:53 | RTT: 60ms | Total: 61ms | Answers: 15 | Rcode: NOERROR | ID: 9539
-[ANSWER] UUID: b4749e73 | stackoverflow.com. 300 IN TXT "google-site-verification=..."
-[ANSWER] UUID: b4749e73 | stackoverflow.com. 300 IN TXT "v=spf1 ip4:198.252.206.71..."
-... (13 more TXT records with same UUID)
+**IPv6 (AAAA) response:**
+```json
+{
+  "timestamp": "2025-06-03T10:40:38.676657383Z",
+  "uuid": "9d8189ad",
+  "request": {
+    "client": "192.168.148.1:59747",
+    "query": "cloudflare.com.",
+    "type": "AAAA",
+    "id": 63430
+  },
+  "response": {
+    "upstream": "8.8.8.8:53",
+    "rcode": "NOERROR",
+    "answer_count": 2,
+    "rtt_ms": 56.983809
+  },
+  "answers": [
+    ["cloudflare.com.", "300", "IN", "AAAA", "2606:4700::6810:85e5"],
+    ["cloudflare.com.", "300", "IN", "AAAA", "2606:4700::6810:84e5"]
+  ],
+  "ip_addresses": [
+    "2606:4700::6810:85e5",
+    "2606:4700::6810:84e5"
+  ],
+  "status": "success",
+  "total_duration_ms": 57.176045
+}
 ```
 
-**Error responses:**
-```
-[REQUEST] UUID: df61b1b0 | Client: 192.168.1.100:12347 | Query: nonexistent.invalid. | Type: A | ID: 22938
-[UPSTREAM] UUID: df61b1b0 | Trying upstream 1/4: 8.8.8.8:53
-[RESPONSE] UUID: df61b1b0 | Success | Upstream: 8.8.8.8:53 | RTT: 42ms | Total: 42ms | Answers: 0 | Rcode: NXDOMAIN | ID: 22938
+**Non-IP record type (MX) - no ip_addresses field:**
+```json
+{
+  "request": {
+    "query": "google.com.",
+    "type": "MX"
+  },
+  "response": {
+    "upstream": "8.8.8.8:53",
+    "rcode": "NOERROR",
+    "answer_count": 1,
+    "rtt_ms": 48.433
+  },
+  "answers": [
+    ["google.com.", "47", "IN", "MX", "10", "smtp.google.com."]
+  ],
+  "status": "success",
+  "total_duration_ms": 48.617
+}
 ```
 
-### Request Correlation Benefits
+**NXDOMAIN (non-existent domain) response:**
+```json
+{
+  "timestamp": "2025-06-03T10:33:57.53317319Z",
+  "uuid": "21a9f843",
+  "request": {
+    "client": "192.168.148.1:40266",
+    "query": "really-nonexistent-domain.invalid.",
+    "type": "A",
+    "id": 31143
+  },
+  "upstreams": [
+    {
+      "server": "8.8.8.8:53",
+      "attempt": 1,
+      "rtt": "53.520346ms",
+      "duration": "53.645345ms"
+    }
+  ],
+  "response": {
+    "upstream": "8.8.8.8:53",
+    "rcode": "NXDOMAIN",
+    "answer_count": 0,
+    "rtt": "53.520346ms"
+  },
+  "status": "success",
+  "total_duration": "53.66522ms"
+}
+```
 
-- **Easy Filtering**: `grep "UUID: 815760ac" logs/dns-server.log` shows all entries for one request
-- **Performance Analysis**: Track end-to-end timing for specific queries
-- **Debugging**: Follow the complete lifecycle of problematic requests
-- **Monitoring**: Identify patterns in failed requests or slow responses
+**Upstream failure scenario (would show multiple attempts):**
+```json
+{
+  "upstreams": [
+    {
+      "server": "8.8.8.8:53",
+      "attempt": 1,
+      "error": "timeout",
+      "duration": "5.0s"
+    },
+    {
+      "server": "8.8.4.4:53",
+      "attempt": 2,
+      "rtt": "45ms",
+      "duration": "46ms"
+    }
+  ],
+  "status": "success"
+}
+```
+
+### JSON Field Definitions
+
+- **timestamp**: ISO8601 timestamp when request was received
+- **uuid**: Unique 8-character identifier for request correlation
+- **request**: Client info, query details, and DNS message ID
+- **upstreams**: Array of all upstream attempts (successful and failed)
+  - **rtt_ms**: Round-trip time in decimal milliseconds (when successful)
+  - **duration_ms**: Total time spent on this upstream attempt in decimal milliseconds
+- **response**: Details of successful response (if any)
+  - **rtt_ms**: Round-trip time in decimal milliseconds
+- **answers**: Array of arrays, where each DNS record is broken into components:
+  - For A records: `["name", "ttl", "class", "type", "ip_address"]`
+  - For MX records: `["name", "ttl", "class", "type", "priority", "mail_server"]`
+  - For AAAA records: `["name", "ttl", "class", "type", "ipv6_address"]`
+- **ip_addresses**: Array of IP addresses extracted from A and AAAA records (only present for IP queries)
+- **status**: Overall request status (`success`, `all_upstreams_failed`, `malformed_query`)
+- **total_duration_ms**: End-to-end processing time in decimal milliseconds
+
+### Log Analysis Examples
+
+```bash
+# View formatted JSON logs
+tail -f logs/dns-server.log | sed 's/^[0-9\/: .]*{/{/' | jq .
+
+# Filter by specific UUID
+grep "da998633" logs/dns-server.log | jq .
+
+# Find all NXDOMAIN responses
+grep '"rcode":"NXDOMAIN"' logs/dns-server.log | jq .
+
+# Find slow queries (>100ms)
+grep -o '{.*}' logs/dns-server.log | jq 'select(.total_duration_ms > 100)'
+
+# Count queries by type
+grep -o '{.*}' logs/dns-server.log | jq -r '.request.type' | sort | uniq -c
+
+# Extract all IP addresses from A/AAAA queries
+grep -o '{.*}' logs/dns-server.log | jq -r '.ip_addresses[]?' | sort | uniq
+
+# Find queries that returned specific IP address
+grep -o '{.*}' logs/dns-server.log | jq 'select(.ip_addresses[]? == "173.194.222.139")'
+
+# Get statistics on query response times
+grep -o '{.*}' logs/dns-server.log | jq -r '.total_duration_ms' | awk '{sum+=$1; count++} END {print "Avg response time:", sum/count, "ms"}'
+
+# Extract IP addresses from structured answers (5th element in A records)
+grep -o '{.*}' logs/dns-server.log | jq -r '.answers[]? | select(.[3] == "A") | .[4]' | sort | uniq
+
+# Find MX record priorities and mail servers
+grep -o '{.*}' logs/dns-server.log | jq -r '.answers[]? | select(.[3] == "MX") | .[4] + " " + .[5]'
+```
 
 ## Usage
 
