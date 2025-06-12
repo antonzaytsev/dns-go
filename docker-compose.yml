@@ -1,25 +1,37 @@
 services:
   dns-server:
     build: .
-    container_name: dns-go
+    container_name: ${CONTAINER_NAME:-dns-go-server}
     ports:
-      - "53:53/udp"
+      - "${DNS_HOST_PORT:-53}:${DNS_PORT:-53}/udp"
     volumes:
-      - ./logs:/logs
+      - ${LOGS_VOLUME_PATH:-./logs}:/logs
     environment:
-      # Optional: Override default settings via environment variables
-      - DNS_LISTEN=0.0.0.0
-      - DNS_PORT=53
+      # Pass environment variables to container
+      - DNS_LISTEN=${DNS_LISTEN_ADDRESS:-0.0.0.0}
+      - DNS_PORT=${DNS_PORT:-53}
     command: [
       "./dns-server",
-      "-listen", "0.0.0.0",
-      "-port", "53",
-      "-upstreams", "8.8.8.8:53,8.8.4.4:53,1.1.1.1:53,1.0.0.1:53",
-      "-log", "/logs/dns-requests.log"
+      "-listen", "${DNS_LISTEN_ADDRESS:-0.0.0.0}",
+      "-port", "${DNS_PORT:-53}",
+      "-upstreams", "${DNS_UPSTREAMS:-8.8.8.8:53,1.1.1.1:53}",
+      "-log", "${DNS_LOG_FILE:-/logs/dns-requests.log}",
+      "-log-level", "${DNS_LOG_LEVEL:-info}",
+      "-cache-size", "${DNS_CACHE_SIZE:-10000}",
+      "-cache-ttl", "${DNS_CACHE_TTL:-5m}",
+      "-max-concurrent", "${DNS_MAX_CONCURRENT:-100}",
+      "-timeout", "${DNS_TIMEOUT:-5s}",
+      "-retry-attempts", "${DNS_RETRY_ATTEMPTS:-3}"
     ]
     restart: unless-stopped
     networks:
       - dns-network
+    healthcheck:
+      test: ["CMD", "./dns-server", "-help"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 networks:
   dns-network:
