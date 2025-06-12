@@ -1,7 +1,7 @@
 services:
   dns-server:
     build: .
-    container_name: dns2-server
+    container_name: dns-go
     ports:
       - "53:53/udp"
     volumes:
