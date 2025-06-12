@@ -1,4 +1,4 @@
-module dns2
+module dns-go
 
 go 1.21
 

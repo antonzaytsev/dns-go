@@ -1,146 +1,102 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/json"
-	"flag"
-	"fmt"
-	"io"
+	"context"
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
+
+	"dns-go/internal/cache"
+	"dns-go/internal/config"
+	"dns-go/internal/logging"
+	"dns-go/internal/types"
+	"dns-go/internal/upstream"
 
 	"github.com/miekg/dns"
 )
 
-// LogEntry represents a complete DNS request/response cycle
-type LogEntry struct {
-	Timestamp   time.Time         `json:"timestamp"`
-	UUID        string            `json:"uuid"`
-	Request     RequestInfo       `json:"request"`
-	Upstreams   []UpstreamAttempt `json:"upstreams"`
-	Response    *ResponseInfo     `json:"response,omitempty"`
-	Answers     [][]string        `json:"answers,omitempty"`
-	IPAddresses []string          `json:"ip_addresses,omitempty"`
-	Status      string            `json:"status"`
-	Duration    float64           `json:"total_duration_ms"`
-}
-
-// RequestInfo contains information about the DNS request
-type RequestInfo struct {
-	Client string `json:"client"`
-	Query  string `json:"query"`
-	Type   string `json:"type"`
-	ID     uint16 `json:"id"`
-}
-
-// UpstreamAttempt represents an attempt to query an upstream server
-type UpstreamAttempt struct {
-	Server   string   `json:"server"`
-	Attempt  int      `json:"attempt"`
-	Error    *string  `json:"error,omitempty"`
-	RTT      *float64 `json:"rtt_ms,omitempty"`
-	Duration float64  `json:"duration_ms"`
-}
-
-// ResponseInfo contains information about the successful response
-type ResponseInfo struct {
-	Upstream    string  `json:"upstream"`
-	Rcode       string  `json:"rcode"`
-	AnswerCount int     `json:"answer_count"`
-	RTT         float64 `json:"rtt_ms"`
-}
-
-// Config holds the DNS server configuration
-type Config struct {
-	ListenAddress string
-	Port          string
-	UpstreamDNS   []string
-	LogFile       string
-}
-
-// DNSServer represents our DNS proxy server
+// DNSServer represents our improved DNS proxy server
 type DNSServer struct {
-	config Config
-	client *dns.Client
+	config         *config.Config
+	logger         *logging.Logger
+	upstreamMgr    *upstream.Manager
+	cache          *cache.Cache
+	requestLimiter chan struct{}
+	wg             sync.WaitGroup
+	shutdown       chan struct{}
 }
 
-// NewDNSServer creates a new DNS server instance
-func NewDNSServer(config Config) *DNSServer {
-	return &DNSServer{
-		config: config,
-		client: &dns.Client{
-			Timeout: 5 * time.Second,
-		},
+// NewDNSServer creates a new DNS server instance with all improvements
+func NewDNSServer(cfg *config.Config, logger *logging.Logger) *DNSServer {
+	// Create upstream manager with concurrent query support
+	upstreamMgr := upstream.New(cfg.UpstreamDNS, cfg.Timeout, cfg.RetryAttempts)
+
+	// Create DNS cache
+	dnsCache := cache.New(cfg.CacheSize, cfg.CacheTTL)
+
+	// Create request limiter channel
+	requestLimiter := make(chan struct{}, cfg.MaxConcurrent)
+
+	server := &DNSServer{
+		config:         cfg,
+		logger:         logger,
+		upstreamMgr:    upstreamMgr,
+		cache:          dnsCache,
+		requestLimiter: requestLimiter,
+		shutdown:       make(chan struct{}),
 	}
+
+	return server
 }
 
-// setupLogging configures logging to file and/or console
-func setupLogging(logFile string) (*os.File, error) {
-	if logFile == "" {
-		// Only console logging
-		log.SetOutput(os.Stdout)
-		return nil, nil
-	}
-
-	// Open log file
-	file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		return nil, err
-	}
-
-	// Setup multi-writer to write to both file and console
-	multiWriter := io.MultiWriter(os.Stdout, file)
-	log.SetOutput(multiWriter)
-
-	// Set log format with timestamp
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-
-	log.Printf("Logging initialized - File: %s", logFile)
-	return file, nil
-}
-
-// generateRequestUUID creates a unique identifier for each request
-func generateRequestUUID() string {
-	b := make([]byte, 4)
-	rand.Read(b)
-	return fmt.Sprintf("%x", b)
-}
-
-// durationToMilliseconds converts time.Duration to milliseconds as float64
-func durationToMilliseconds(d time.Duration) float64 {
-	return float64(d.Nanoseconds()) / 1e6
-}
-
-// handleDNSRequest processes incoming DNS queries
+// handleDNSRequest processes incoming DNS queries with caching and concurrent upstream queries
 func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
+	// Rate limiting
+	select {
+	case s.requestLimiter <- struct{}{}:
+		defer func() { <-s.requestLimiter }()
+	default:
+		// Too many concurrent requests, return SERVFAIL
+		s.logger.Warn("Request rate limited", map[string]interface{}{
+			"client": w.RemoteAddr().String(),
+		})
+		msg := &dns.Msg{}
+		msg.SetRcode(r, dns.RcodeServerFailure)
+		w.WriteMsg(msg)
+		return
+	}
+
 	start := time.Now()
 	clientAddr := w.RemoteAddr().String()
-	requestUUID := generateRequestUUID()
+	requestUUID := types.GenerateRequestUUID()
 
 	// Initialize log entry
-	logEntry := LogEntry{
+	logEntry := types.LogEntry{
 		Timestamp: start,
 		UUID:      requestUUID,
-		Upstreams: make([]UpstreamAttempt, 0),
+		Upstreams: make([]types.UpstreamAttempt, 0),
 		Status:    "unknown",
 	}
 
 	// Handle malformed queries
 	if len(r.Question) == 0 {
-		logEntry.Request = RequestInfo{
+		logEntry.Request = types.RequestInfo{
 			Client: clientAddr,
 			Query:  "MALFORMED",
 			Type:   "UNKNOWN",
 			ID:     r.Id,
 		}
 		logEntry.Status = "malformed_query"
-		logEntry.Duration = durationToMilliseconds(time.Since(start))
+		logEntry.Duration = types.DurationToMilliseconds(time.Since(start))
 
-		// Log and return error
-		s.logJSON(logEntry)
+		s.logger.LogJSON(logEntry)
+		s.logger.LogRequestResponse(requestUUID, clientAddr, "MALFORMED", "UNKNOWN",
+			"malformed_query", types.DurationToMilliseconds(time.Since(start)), false, "none")
 		msg := &dns.Msg{}
 		msg.SetRcode(r, dns.RcodeFormatError)
 		w.WriteMsg(msg)
@@ -149,132 +105,125 @@ func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 	// Set request information
 	question := r.Question[0]
-	logEntry.Request = RequestInfo{
+	logEntry.Request = types.RequestInfo{
 		Client: clientAddr,
 		Query:  question.Name,
 		Type:   dns.TypeToString[question.Qtype],
 		ID:     r.Id,
 	}
 
-	// Try each upstream DNS server until we get a response
-	for i, upstream := range s.config.UpstreamDNS {
-		upstreamStart := time.Now()
+	// Check cache first
+	if cachedResp, found := s.cache.Get(question); found {
+		logEntry.CacheHit = true
+		logEntry.Status = "cache_hit"
+		logEntry.Duration = types.DurationToMilliseconds(time.Since(start))
 
-		resp, rtt, err := s.client.Exchange(r, upstream)
-		upstreamDuration := time.Since(upstreamStart)
+		// Update response ID to match request
+		cachedResp.Id = r.Id
 
-		// Record upstream attempt
-		attempt := UpstreamAttempt{
-			Server:   upstream,
-			Attempt:  i + 1,
-			Duration: durationToMilliseconds(upstreamDuration),
+		// Set response info for cache hit
+		logEntry.Response = &types.ResponseInfo{
+			Upstream:    "cache",
+			Rcode:       dns.RcodeToString[cachedResp.Rcode],
+			AnswerCount: len(cachedResp.Answer),
+			RTT:         0, // Cache hit, no network RTT
 		}
 
-		if err != nil {
-			errStr := err.Error()
-			attempt.Error = &errStr
-			logEntry.Upstreams = append(logEntry.Upstreams, attempt)
-			continue
-		}
+		logEntry.Answers = types.ExtractAnswers(cachedResp.Answer)
+		logEntry.IPAddresses = types.ExtractIPAddresses(cachedResp.Answer)
 
-		if resp != nil {
-			rttStr := durationToMilliseconds(rtt)
-			attempt.RTT = &rttStr
-			logEntry.Upstreams = append(logEntry.Upstreams, attempt)
-
-			// Set response information
-			logEntry.Response = &ResponseInfo{
-				Upstream:    upstream,
-				Rcode:       dns.RcodeToString[resp.Rcode],
-				AnswerCount: len(resp.Answer),
-				RTT:         rttStr,
-			}
-
-			// Collect answer records
-			logEntry.Answers = make([][]string, len(resp.Answer))
-			for j, answer := range resp.Answer {
-				// Parse the answer record into components
-				answerStr := answer.String()
-				parts := strings.Fields(answerStr)
-
-				// Ensure we have at least the basic components
-				if len(parts) >= 4 {
-					logEntry.Answers[j] = parts
-				} else {
-					// Fallback to the original string as a single element
-					logEntry.Answers[j] = []string{answerStr}
-				}
-			}
-
-			// Collect IP addresses from A and AAAA records
-			logEntry.IPAddresses = make([]string, 0)
-			for _, answer := range resp.Answer {
-				switch rr := answer.(type) {
-				case *dns.A:
-					logEntry.IPAddresses = append(logEntry.IPAddresses, rr.A.String())
-				case *dns.AAAA:
-					logEntry.IPAddresses = append(logEntry.IPAddresses, rr.AAAA.String())
-				}
-			}
-
-			logEntry.Status = "success"
-			logEntry.Duration = durationToMilliseconds(time.Since(start))
-
-			// Log successful response
-			s.logJSON(logEntry)
-
-			// Forward the response back to the client
-			if err := w.WriteMsg(resp); err != nil {
-				// Log write error separately as it's after the main request processing
-				errorLog := map[string]interface{}{
-					"timestamp": time.Now(),
-					"uuid":      requestUUID,
-					"error":     "failed_to_write_response",
-					"message":   err.Error(),
-					"client":    clientAddr,
-				}
-				s.logJSON(errorLog)
-			}
-			return
-		} else {
-			logEntry.Upstreams = append(logEntry.Upstreams, attempt)
-		}
+		s.logger.LogJSON(logEntry)
+		s.logger.LogRequestResponse(requestUUID, clientAddr, question.Name,
+			dns.TypeToString[question.Qtype], "cache_hit",
+			types.DurationToMilliseconds(time.Since(start)), true, "cache")
+		w.WriteMsg(cachedResp)
+		return
 	}
 
-	// If all upstreams failed, return SERVFAIL
-	logEntry.Status = "all_upstreams_failed"
-	logEntry.Duration = durationToMilliseconds(time.Since(start))
+	// Query upstream servers concurrently
+	ctx, cancel := context.WithTimeout(context.Background(), s.config.Timeout)
+	defer cancel()
 
-	s.logJSON(logEntry)
+	result, allResults := s.upstreamMgr.QueryConcurrent(ctx, r)
+
+	// Convert upstream results to log format
+	for i, upstreamResult := range allResults {
+		attempt := types.UpstreamAttempt{
+			Server:   upstreamResult.Server,
+			Attempt:  i + 1,
+			Duration: types.DurationToMilliseconds(upstreamResult.RTT),
+		}
+
+		if upstreamResult.Error != nil {
+			errStr := upstreamResult.Error.Error()
+			attempt.Error = &errStr
+		} else {
+			rttMs := types.DurationToMilliseconds(upstreamResult.RTT)
+			attempt.RTT = &rttMs
+		}
+
+		logEntry.Upstreams = append(logEntry.Upstreams, attempt)
+	}
+
+	if result.Error == nil && result.Response != nil {
+		// Successful response
+		logEntry.Response = &types.ResponseInfo{
+			Upstream:    result.Server,
+			Rcode:       dns.RcodeToString[result.Response.Rcode],
+			AnswerCount: len(result.Response.Answer),
+			RTT:         types.DurationToMilliseconds(result.RTT),
+		}
+
+		logEntry.Answers = types.ExtractAnswers(result.Response.Answer)
+		logEntry.IPAddresses = types.ExtractIPAddresses(result.Response.Answer)
+		logEntry.Status = "success"
+		logEntry.Duration = types.DurationToMilliseconds(time.Since(start))
+
+		// Cache the response
+		s.cache.Set(question, result.Response)
+
+		s.logger.LogJSON(logEntry)
+		s.logger.LogRequestResponse(requestUUID, clientAddr, question.Name,
+			dns.TypeToString[question.Qtype], "success",
+			types.DurationToMilliseconds(time.Since(start)), false, result.Server)
+
+		// Forward the response back to the client
+		if err := w.WriteMsg(result.Response); err != nil {
+			s.logger.Error("Failed to write response", map[string]interface{}{
+				"uuid":   requestUUID,
+				"client": clientAddr,
+				"error":  err.Error(),
+			})
+		}
+		return
+	}
+
+	// All upstreams failed
+	logEntry.Status = "all_upstreams_failed"
+	logEntry.Duration = types.DurationToMilliseconds(time.Since(start))
+	s.logger.LogJSON(logEntry)
+	s.logger.LogRequestResponse(requestUUID, clientAddr, question.Name,
+		dns.TypeToString[question.Qtype], "all_upstreams_failed",
+		types.DurationToMilliseconds(time.Since(start)), false, "none")
 
 	msg := &dns.Msg{}
 	msg.SetRcode(r, dns.RcodeServerFailure)
 	if err := w.WriteMsg(msg); err != nil {
-		// Log write error separately
-		errorLog := map[string]interface{}{
-			"timestamp": time.Now(),
-			"uuid":      requestUUID,
-			"error":     "failed_to_write_servfail",
-			"message":   err.Error(),
-			"client":    clientAddr,
-		}
-		s.logJSON(errorLog)
+		s.logger.Error("Failed to write SERVFAIL", map[string]interface{}{
+			"uuid":   requestUUID,
+			"client": clientAddr,
+			"error":  err.Error(),
+		})
 	}
 }
 
-// logJSON outputs a structured log entry as JSON
-func (s *DNSServer) logJSON(entry interface{}) {
-	jsonBytes, err := json.Marshal(entry)
-	if err != nil {
-		log.Printf("Error marshaling log entry: %v", err)
-		return
-	}
-	log.Println(string(jsonBytes))
-}
-
-// Start begins the DNS server
+// Start begins the DNS server with all improvements
 func (s *DNSServer) Start() error {
-	// Create DNS handler
+	// Start background services
+	s.upstreamMgr.StartHealthChecks(s.config.HealthCheckInterval)
+	s.cache.StartCleanupTimer(5 * time.Minute)
+
+	// Setup DNS handler
 	dns.HandleFunc(".", s.handleDNSRequest)
 
 	// Setup UDP server
@@ -283,69 +232,114 @@ func (s *DNSServer) Start() error {
 		Net:  "udp",
 	}
 
-	log.Printf("Starting DNS server on %s:%s", s.config.ListenAddress, s.config.Port)
-	log.Printf("Upstream DNS servers: %s", strings.Join(s.config.UpstreamDNS, ", "))
+	s.logger.Info("Starting DNS server", map[string]interface{}{
+		"address":   s.config.ListenAddress,
+		"port":      s.config.Port,
+		"upstreams": strings.Join(s.config.UpstreamDNS, ", "),
+	})
 
-	return server.ListenAndServe()
+	// Start server in goroutine
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		if err := server.ListenAndServe(); err != nil {
+			s.logger.Error("DNS server error", map[string]interface{}{
+				"error": err.Error(),
+			})
+		}
+	}()
+
+	// Wait for shutdown signal
+	<-s.shutdown
+
+	s.logger.Info("Shutting down DNS server", nil)
+
+	// Stop background services
+	s.upstreamMgr.StopHealthChecks()
+
+	// Shutdown server
+	if err := server.Shutdown(); err != nil {
+		s.logger.Error("Error shutting down server", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+
+	s.wg.Wait()
+	return nil
+}
+
+// Shutdown gracefully stops the DNS server
+func (s *DNSServer) Shutdown() {
+	close(s.shutdown)
+}
+
+// GetStats returns server statistics
+func (s *DNSServer) GetStats() map[string]interface{} {
+	cacheSize, maxCacheSize := s.cache.Stats()
+	upstreamStats := s.upstreamMgr.GetStats()
+
+	return map[string]interface{}{
+		"cache": map[string]interface{}{
+			"size":     cacheSize,
+			"max_size": maxCacheSize,
+		},
+		"upstreams": upstreamStats,
+	}
 }
 
 func main() {
-	// Command line flags
-	listenAddr := flag.String("listen", "0.0.0.0", "Listen address")
-	port := flag.String("port", "53", "Listen port")
-	upstreams := flag.String("upstreams", "8.8.8.8:53,1.1.1.1:53", "Comma-separated list of upstream DNS servers")
-	logFile := flag.String("log", "", "Log file path (optional, logs to console if not specified)")
-	flag.Parse()
+	// Load configuration
+	cfg, err := config.LoadFromFlags()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
 
 	// Setup logging
-	var file *os.File
-	if *logFile != "" {
-		var err error
-		file, err = setupLogging(*logFile)
-		if err != nil {
-			log.Fatalf("Failed to setup logging: %v", err)
-		}
-		// Ensure file is closed when program exits
-		if file != nil {
-			defer func() {
-				log.Println("Closing log file...")
-				file.Close()
-			}()
-		}
-	} else {
-		// Setup console-only logging
-		log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-		log.Println("Logging to console only")
+	logger, jsonFile, humanFile, err := logging.NewFromConfig(cfg.LogFile, cfg.LogLevel)
+	if err != nil {
+		log.Fatalf("Failed to setup logging: %v", err)
+	}
+	if jsonFile != nil {
+		defer func() {
+			logger.Info("Closing log files", nil)
+			jsonFile.Close()
+		}()
+	}
+	if humanFile != nil {
+		defer humanFile.Close()
 	}
 
-	// Parse upstream servers
-	upstreamList := strings.Split(*upstreams, ",")
-	for i, upstream := range upstreamList {
-		upstreamList[i] = strings.TrimSpace(upstream)
-	}
+	// Create and configure DNS server
+	server := NewDNSServer(cfg, logger)
 
-	// Create configuration
-	config := Config{
-		ListenAddress: *listenAddr,
-		Port:          *port,
-		UpstreamDNS:   upstreamList,
-		LogFile:       *logFile,
-	}
+	// Setup graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Create and start DNS server
-	server := NewDNSServer(config)
+	go func() {
+		<-sigChan
+		logger.Info("Received shutdown signal", nil)
+		server.Shutdown()
+	}()
 
-	log.Printf("DNS Proxy Server starting...")
-	log.Printf("Configuration:")
-	log.Printf("  Listen: %s:%s", config.ListenAddress, config.Port)
-	log.Printf("  Upstreams: %v", config.UpstreamDNS)
-	if config.LogFile != "" {
-		log.Printf("  Log File: %s", config.LogFile)
-	} else {
-		log.Printf("  Log File: Console only")
-	}
+	logger.Info("DNS Proxy Server starting", map[string]interface{}{
+		"config": map[string]interface{}{
+			"listen":         cfg.ListenAddress + ":" + cfg.Port,
+			"upstreams":      cfg.UpstreamDNS,
+			"log_file":       cfg.LogFile,
+			"log_level":      cfg.LogLevel,
+			"cache_size":     cfg.CacheSize,
+			"cache_ttl":      cfg.CacheTTL.String(),
+			"max_concurrent": cfg.MaxConcurrent,
+			"timeout":        cfg.Timeout.String(),
+		},
+	})
 
+	// Start server
 	if err := server.Start(); err != nil {
-		log.Fatalf("Failed to start DNS server: %v", err)
+		logger.Error("Failed to start DNS server", map[string]interface{}{
+			"error": err.Error(),
+		})
+		os.Exit(1)
 	}
 }
