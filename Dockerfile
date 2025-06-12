@@ -35,11 +35,11 @@ FROM alpine:latest AS production
 
 # Install ca-certificates and timezone data
 RUN apk --no-cache add ca-certificates tzdata \
-    && addgroup -g 1001 -S dns \
-    && adduser -u 1001 -S dns -G dns
+    && addgroup -g 1000 -S dns \
+    && adduser -u 1000 -S dns -G dns
 
-# Create logs directory
-RUN mkdir -p /logs && chown dns:dns /logs
+# Create logs directory with permissive permissions
+RUN mkdir -p /logs && chmod -R 777 /logs
 
 WORKDIR /app
 
