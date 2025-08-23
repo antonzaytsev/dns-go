@@ -56,8 +56,10 @@ services:
       "-log-file", "${DNS_LOG_FILE:-/logs/dns-requests.log}"
     ]
     depends_on:
-      - dns-server
-      - elasticsearch
+      dns-server:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - dns-network
