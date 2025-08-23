@@ -23,6 +23,9 @@ services:
       "-timeout", "${DNS_TIMEOUT:-5s}",
       "-retry-attempts", "${DNS_RETRY_ATTEMPTS:-3}"
     ]
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "./dns-server", "-help"]
