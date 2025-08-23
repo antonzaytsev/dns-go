@@ -84,6 +84,9 @@ const RecentRequests = ({ requests }) => {
                   Duration
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Response IPs
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Upstream
                 </th>
               </tr>
@@ -135,6 +138,30 @@ const RecentRequests = ({ requests }) => {
                     }`}>
                       {request.total_duration_ms?.toFixed(1) || '0.0'}ms
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600 max-w-xs">
+                    {request.ip_addresses && request.ip_addresses.length > 0 ? (
+                      <div className="space-y-1">
+                        {request.ip_addresses.slice(0, 3).map((ip, ipIndex) => (
+                          <div key={ipIndex} className="flex items-center space-x-1">
+                            <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">
+                              {ip}
+                            </span>
+                          </div>
+                        ))}
+                        {request.ip_addresses.length > 3 && (
+                          <div className="text-xs text-gray-400">
+                            +{request.ip_addresses.length - 3} more
+                          </div>
+                        )}
+                      </div>
+                    ) : request.status === 'success' && request.response?.answer_count > 0 ? (
+                      <span className="text-xs text-gray-400 italic">
+                        {request.response.answer_count} answer{request.response.answer_count !== 1 ? 's' : ''}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">-</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
                     {request.response?.upstream === 'cache' ? (
