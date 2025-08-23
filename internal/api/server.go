@@ -59,6 +59,7 @@ func NewServer(cfg Config) (*Server, error) {
 
 	// API endpoints
 	mux.HandleFunc("/api/metrics", s.handleMetrics)
+	mux.HandleFunc("/api/search", s.handleSearch)
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/version", s.handleVersion)
 
@@ -84,6 +85,7 @@ func (s *Server) Start() error {
 	fmt.Printf("Time: %s\n", time.Now().Format("2006-01-02 15:04:05"))
 	fmt.Printf("\n📡 Available Endpoints:\n")
 	fmt.Printf("  🔍 GET /api/metrics  - DNS server metrics and statistics\n")
+	fmt.Printf("  🔎 GET /api/search   - Search through DNS logs\n")
 	fmt.Printf("  ❤️  GET /api/health   - Health check endpoint\n")
 	fmt.Printf("  ℹ️  GET /api/version  - Version and build information\n")
 	fmt.Printf("\n🌐 Access URLs:\n")
@@ -150,6 +152,65 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodGet {
 		json.NewEncoder(w).Encode(health)
+	}
+}
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Parse query parameters
+	query := r.URL.Query()
+	searchTerm := query.Get("q")
+	limitStr := query.Get("limit")
+	offsetStr := query.Get("offset")
+
+	// Set defaults
+	limit := 100
+	offset := 0
+
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 1000 {
+			limit = l
+		}
+	}
+
+	if offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	// If no log monitor, return empty results
+	if s.logMonitor == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"results": []interface{}{},
+			"total":   0,
+			"limit":   limit,
+			"offset":  offset,
+			"query":   searchTerm,
+		})
+		return
+	}
+
+	// Perform search
+	results, total := s.logMonitor.SearchLogs(searchTerm, limit, offset)
+
+	response := map[string]interface{}{
+		"results": results,
+		"total":   total,
+		"limit":   limit,
+		"offset":  offset,
+		"query":   searchTerm,
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode search results", http.StatusInternalServerError)
+		return
 	}
 }
 

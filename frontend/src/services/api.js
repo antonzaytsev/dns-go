@@ -65,6 +65,22 @@ export const dnsApi = {
       throw error;
     }
   },
+
+  // Search DNS logs
+  searchLogs: async (searchTerm, limit = 100, offset = 0) => {
+    try {
+      const params = new URLSearchParams();
+      if (searchTerm) params.append('q', searchTerm);
+      params.append('limit', limit.toString());
+      params.append('offset', offset.toString());
+
+      const response = await api.get(`/search?${params.toString()}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to search logs:', error);
+      throw error;
+    }
+  },
 };
 
 export default api;

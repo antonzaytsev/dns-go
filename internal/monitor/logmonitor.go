@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"dns-go/internal/metrics"
@@ -186,6 +187,117 @@ func (lm *LogMonitor) checkForNewEntries(file **os.File, lastSize *int64) error 
 // GetLogFilePath returns the path to the log file being monitored
 func (lm *LogMonitor) GetLogFilePath() string {
 	return lm.logFilePath
+}
+
+// SearchLogs searches through all DNS logs for entries matching the search term
+func (lm *LogMonitor) SearchLogs(searchTerm string, limit, offset int) ([]types.LogEntry, int) {
+	if lm.logFilePath == "" {
+		return []types.LogEntry{}, 0
+	}
+
+	file, err := os.Open(lm.logFilePath)
+	if err != nil {
+		fmt.Printf("Error opening log file for search: %v\n", err)
+		return []types.LogEntry{}, 0
+	}
+	defer file.Close()
+
+	var allMatches []types.LogEntry
+	scanner := bufio.NewScanner(file)
+	searchLower := strings.ToLower(searchTerm)
+
+	// Read all lines and filter
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		var entry types.LogEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue // Skip malformed entries
+		}
+
+		// If no search term, include all entries
+		if searchTerm == "" {
+			allMatches = append(allMatches, entry)
+			continue
+		}
+
+		// Search in various fields
+		if lm.matchesSearchTerm(entry, searchLower) {
+			allMatches = append(allMatches, entry)
+		}
+	}
+
+	total := len(allMatches)
+
+	// Apply pagination
+	start := offset
+	if start > total {
+		start = total
+	}
+
+	end := start + limit
+	if end > total {
+		end = total
+	}
+
+	if start >= end {
+		return []types.LogEntry{}, total
+	}
+
+	// Return results in reverse order (newest first)
+	results := make([]types.LogEntry, 0, end-start)
+	for i := total - 1 - start; i >= total-end; i-- {
+		if i >= 0 && i < len(allMatches) {
+			results = append(results, allMatches[i])
+		}
+	}
+
+	return results, total
+}
+
+// matchesSearchTerm checks if a DNS log entry matches the search term
+func (lm *LogMonitor) matchesSearchTerm(entry types.LogEntry, searchLower string) bool {
+	// Search in query domain
+	if strings.Contains(strings.ToLower(entry.Request.Query), searchLower) {
+		return true
+	}
+
+	// Search in client IP
+	if strings.Contains(strings.ToLower(entry.Request.Client), searchLower) {
+		return true
+	}
+
+	// Search in query type
+	if strings.Contains(strings.ToLower(entry.Request.Type), searchLower) {
+		return true
+	}
+
+	// Search in status
+	if strings.Contains(strings.ToLower(entry.Status), searchLower) {
+		return true
+	}
+
+	// Search in upstream server
+	if entry.Response != nil && strings.Contains(strings.ToLower(entry.Response.Upstream), searchLower) {
+		return true
+	}
+
+	// Search in IP addresses
+	for _, ip := range entry.IPAddresses {
+		if strings.Contains(strings.ToLower(ip), searchLower) {
+			return true
+		}
+	}
+
+	// Search in UUID
+	if strings.Contains(strings.ToLower(entry.UUID), searchLower) {
+		return true
+	}
+
+	return false
 }
 
 // FindLogFile attempts to find the DNS log file in common locations
