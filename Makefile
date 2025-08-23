@@ -1,8 +1,12 @@
-.PHONY: build build-dev build-prod run test clean docker-build docker-run fmt vet lint deps help all
+.PHONY: build build-dev build-prod build-web run test clean docker-build docker-run fmt vet lint deps help all
 
 # Build variables
-APP_NAME := dns-server
-MAIN_PATH := ./cmd/dns-server
+DNS_APP_NAME := dns-server
+WEB_APP_NAME := web-dashboard
+API_APP_NAME := api-server
+DNS_MAIN_PATH := ./cmd/dns-server
+WEB_MAIN_PATH := ./cmd/web-dashboard
+API_MAIN_PATH := ./cmd/api-server
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 GIT_COMMIT := $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -21,20 +25,50 @@ LDFLAGS_DEV := -ldflags "\
     -X 'dns-go/pkg/version.GitCommit=$(GIT_COMMIT)' \
     -X 'dns-go/pkg/version.BuildDate=$(BUILD_DATE)'"
 
-# Build the application (production)
-build-prod:
-	CGO_ENABLED=0 go build $(LDFLAGS) -o $(APP_NAME) $(MAIN_PATH)
+# Build DNS server (production)
+build-dns-prod:
+	CGO_ENABLED=0 go build $(LDFLAGS) -o $(DNS_APP_NAME) $(DNS_MAIN_PATH)
 
-# Build the application (development)
-build-dev:
-	go build $(LDFLAGS_DEV) -o $(APP_NAME) $(MAIN_PATH)
+# Build web dashboard (production)
+build-web-prod:
+	CGO_ENABLED=0 go build $(LDFLAGS) -o $(WEB_APP_NAME) $(WEB_MAIN_PATH)
+
+# Build API server (production)
+build-api-prod:
+	CGO_ENABLED=0 go build $(LDFLAGS) -o $(API_APP_NAME) $(API_MAIN_PATH)
+
+# Build DNS server (development)
+build-dns-dev:
+	go build $(LDFLAGS_DEV) -o $(DNS_APP_NAME) $(DNS_MAIN_PATH)
+
+# Build web dashboard (development)
+build-web-dev:
+	go build $(LDFLAGS_DEV) -o $(WEB_APP_NAME) $(WEB_MAIN_PATH)
+
+# Build API server (development)
+build-api-dev:
+	go build $(LDFLAGS_DEV) -o $(API_APP_NAME) $(API_MAIN_PATH)
+
+# Build all applications (production)
+build-prod: build-dns-prod build-web-prod build-api-prod
+
+# Build all applications (development)
+build-dev: build-dns-dev build-web-dev build-api-dev
 
 # Default build target (development)
 build: build-dev
 
-# Run the application with default settings
+# Run the DNS server with default settings
 run:
-	./$(APP_NAME)
+	./$(DNS_APP_NAME)
+
+# Run the web dashboard with default settings
+run-web:
+	./$(WEB_APP_NAME)
+
+# Run the API server with default settings
+run-api:
+	./$(API_APP_NAME)
 
 # Run tests with coverage
 test:
@@ -45,9 +79,34 @@ test:
 test-pkg:
 	go test -v -race ./internal/cache
 
-# Run with development settings
-run-dev:
-	go run $(MAIN_PATH) -listen=127.0.0.1 -port=5053 -log=./logs/dns-requests.log -log-level=debug -cache-size=1000
+# Run DNS server with development settings
+run-dns-dev:
+	go run $(DNS_MAIN_PATH) -listen=127.0.0.1 -port=5053 -log=./logs/dns-requests.log -log-level=debug -cache-size=1000
+
+# Run API server with development settings
+run-api-dev:
+	go run $(API_MAIN_PATH) -port=8080 -log-file=./logs/dns-requests.log
+
+# Run web dashboard with development settings
+run-web-dev:
+	go run $(WEB_MAIN_PATH) -port=8080 -log-file=./logs/dns-requests.log
+
+# Build and serve React frontend
+frontend-install:
+	cd frontend && npm install
+
+# Start React development server
+frontend-dev:
+	cd frontend && npm start
+
+# Build React frontend for production
+frontend-build:
+	cd frontend && npm run build
+
+# Run both API and frontend in development mode
+run-dev: build-api-dev
+	./$(API_APP_NAME) -port=8080 -log-file=./logs/dns-requests.log &
+	cd frontend && npm start
 
 # Benchmark tests
 bench:
@@ -74,27 +133,48 @@ security:
 
 # Clean build artifacts
 clean:
-	rm -f $(APP_NAME)
+	rm -f $(DNS_APP_NAME) $(WEB_APP_NAME) $(API_APP_NAME)
 	rm -f coverage.out
 	rm -rf logs/*
+	rm -rf dist/
+	rm -rf frontend/build/
+	rm -rf frontend/node_modules/
 	go clean -cache
 	go clean -testcache
 
-# Docker build
+# Docker build all services
 docker-build:
-	docker build -t dns-go .
+	docker-compose build
 
-# Docker run
+# Docker build specific services
+docker-build-dns:
+	docker-compose build dns-server
+
+docker-build-api:
+	docker-compose build api-server
+
+docker-build-frontend:
+	docker-compose build frontend
+
+# Docker run all services
 docker-run:
 	docker-compose up -d
+
+# Docker run with build
+docker-up:
+	docker-compose up --build -d
 
 # Docker stop
 docker-stop:
 	docker-compose down
 
-# Docker build with multi-stage optimization
-docker-build-prod:
-	docker build --target production -t dns-go:latest .
+# Docker logs
+docker-logs:
+	docker-compose logs -f
+
+# Start development environment
+docker-dev:
+	./start-dev.sh
 
 # Install dependencies
 deps:
@@ -112,13 +192,19 @@ generate:
 	go generate ./...
 
 # Cross-compile for multiple platforms
-build-all:
-	@echo "Building for multiple platforms..."
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(APP_NAME)-linux-amd64 $(MAIN_PATH)
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(APP_NAME)-linux-arm64 $(MAIN_PATH)
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(APP_NAME)-darwin-amd64 $(MAIN_PATH)
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(APP_NAME)-darwin-arm64 $(MAIN_PATH)
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(APP_NAME)-windows-amd64.exe $(MAIN_PATH)
+build-all: dist
+	@echo "Building DNS server for multiple platforms..."
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(DNS_APP_NAME)-linux-amd64 $(DNS_MAIN_PATH)
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(DNS_APP_NAME)-linux-arm64 $(DNS_MAIN_PATH)
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(DNS_APP_NAME)-darwin-amd64 $(DNS_MAIN_PATH)
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(DNS_APP_NAME)-darwin-arm64 $(DNS_MAIN_PATH)
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(DNS_APP_NAME)-windows-amd64.exe $(DNS_MAIN_PATH)
+	@echo "Building web dashboard for multiple platforms..."
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(WEB_APP_NAME)-linux-amd64 $(WEB_MAIN_PATH)
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(WEB_APP_NAME)-linux-arm64 $(WEB_MAIN_PATH)
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(WEB_APP_NAME)-darwin-amd64 $(WEB_MAIN_PATH)
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(WEB_APP_NAME)-darwin-arm64 $(WEB_MAIN_PATH)
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $(LDFLAGS) -o dist/$(WEB_APP_NAME)-windows-amd64.exe $(WEB_MAIN_PATH)
 
 # Show version information
 version:
@@ -127,9 +213,13 @@ version:
 	@echo "Build Date: $(BUILD_DATE)"
 	@echo "Go Version: $(GO_VERSION)"
 
-# Show build info from binary
+# Show build info from DNS server binary
 info:
-	./$(APP_NAME) -version
+	./$(DNS_APP_NAME) -version
+
+# Show build info from web dashboard binary
+info-web:
+	./$(WEB_APP_NAME) -version
 
 # Create release directory
 dist:
@@ -145,12 +235,19 @@ dev-setup: deps
 # Show help
 help:
 	@echo "Available targets:"
-	@echo "  build          - Build the DNS server binary (development)"
-	@echo "  build-dev      - Build with debug info"
-	@echo "  build-prod     - Build optimized production binary"
-	@echo "  build-all      - Cross-compile for multiple platforms"
+	@echo "  build          - Build both DNS server and web dashboard (development)"
+	@echo "  build-dev      - Build both applications with debug info"
+	@echo "  build-prod     - Build both applications optimized for production"
+	@echo "  build-dns-dev  - Build DNS server with debug info"
+	@echo "  build-dns-prod - Build DNS server optimized for production"
+	@echo "  build-web-dev  - Build web dashboard with debug info"
+	@echo "  build-web-prod - Build web dashboard optimized for production"
+	@echo "  build-all      - Cross-compile both applications for multiple platforms"
 	@echo "  run            - Run the DNS server with default settings"
-	@echo "  run-dev        - Run in development mode with debug logging"
+	@echo "  run-web        - Run the web dashboard with default settings"
+	@echo "  run-dev        - Run both applications in development mode"
+	@echo "  run-dns-dev    - Run DNS server in development mode with debug logging"
+	@echo "  run-web-dev    - Run web dashboard in development mode"
 	@echo "  test           - Run all tests with coverage"
 	@echo "  test-pkg       - Run tests for specific package"
 	@echo "  bench          - Run benchmark tests"
@@ -166,7 +263,8 @@ help:
 	@echo "  deps-update    - Update all dependencies"
 	@echo "  dev-setup      - Install development tools"
 	@echo "  version        - Show build version information"
-	@echo "  info           - Show version from built binary"
+	@echo "  info           - Show version from DNS server binary"
+	@echo "  info-web       - Show version from web dashboard binary"
 	@echo "  help           - Show this help message"
 
 # Default target

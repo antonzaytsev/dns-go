@@ -1,12 +1,18 @@
 # DNS Proxy Server
 
-A high-performance DNS proxy server written in Go with caching, concurrent upstream queries, and comprehensive monitoring.
+A high-performance DNS proxy server written in Go with caching, concurrent upstream queries, comprehensive monitoring, and a modern web dashboard.
 
 ## Quick Start
 
 ### Development Mode
 ```bash
-# Run on localhost:5053 with debug logging
+# Run DNS server on localhost:5053 with debug logging
+make run-dns-dev
+
+# Run web dashboard on localhost:8080
+make run-web-dev
+
+# Run both DNS server and web dashboard
 make run-dev
 ```
 
@@ -27,8 +33,11 @@ make build
 
 ### Docker Deployment
 ```bash
-# Quick start with Docker Compose
+# Quick start with Docker Compose (DNS server + Web dashboard)
 make docker-run
+
+# Access the web dashboard at http://localhost:8080
+# DNS server available on port 53
 
 # Or manually
 docker build -t dns-go .
@@ -42,10 +51,46 @@ docker run -d -p 53:53/udp -v $(pwd)/logs:/logs dns-go
 - **🏥 Health Monitoring**: Automatic upstream server health tracking with circuit breaker
 - **📊 Rate Limiting**: Configurable concurrent request limiting
 - **🔍 Dual Logging**: Clean JSON logs for analysis + human-readable logs for monitoring
+- **📈 Web Dashboard**: Real-time metrics, charts, and monitoring interface
 - **🐳 Production Ready**: Docker support, graceful shutdown, comprehensive configuration
 - **🛡️ Resilient**: Automatic failover and recovery mechanisms
 
-## Configuration Options
+## Web Dashboard
+
+The DNS server includes a modern web dashboard for real-time monitoring and analytics.
+
+### Features
+- **📊 Real-time Metrics**: Live statistics with auto-refresh
+- **📈 Interactive Charts**: Request patterns over time
+- **👥 Client Analytics**: Top clients and request patterns
+- **🌐 Upstream Monitoring**: Server health and performance
+- **📝 Recent Requests**: Live request feed with details
+- **🎨 Modern UI**: Responsive design with dark mode support
+
+### Access
+- **URL**: http://localhost:8080 (default)
+- **API**: http://localhost:8080/api/metrics
+- **Health Check**: http://localhost:8080/api/health
+
+### Dashboard Sections
+1. **Overview Cards**: Total requests, cache hit rate, success rate, response times
+2. **Time Series Charts**: Requests per minute/hour with interactive graphs
+3. **Query Types**: Distribution of DNS query types (A, AAAA, MX, etc.)
+4. **Top Clients**: Most active clients with success rates
+5. **Upstream Servers**: Health status and performance metrics
+6. **Recent Requests**: Live feed of DNS queries with details
+
+### Configuration
+```bash
+# Web dashboard configuration
+./web-dashboard -port=8080 -log-file=./logs/dns-requests.log
+
+# Environment variables
+export WEB_PORT=8080
+export DNS_LOG_FILE=./logs/dns-requests.log
+```
+
+## DNS Server Configuration
 
 ```bash
 Usage of ./dns-server:
@@ -116,13 +161,20 @@ time dig @localhost google.com  # Should be fast on second request (cache hit)
 
 ```
 dns-go/
+├── cmd/
+│   ├── dns-server/     # DNS server main application
+│   └── web-dashboard/  # Web dashboard main application
 ├── internal/
 │   ├── cache/          # DNS response caching with TTL
 │   ├── config/         # Configuration management
 │   ├── logging/        # Structured logging
+│   ├── metrics/        # Metrics collection and aggregation
+│   ├── monitor/        # Log file monitoring
 │   ├── types/          # Shared data structures
-│   └── upstream/       # Upstream server management with health checks
-├── main.go            # Main application
+│   ├── upstream/       # Upstream server management with health checks
+│   └── webserver/      # HTTP server and dashboard UI
+├── pkg/
+│   └── version/        # Version information
 ├── Makefile           # Development tasks
 └── docker-compose.yml # Container deployment
 ```
@@ -267,6 +319,24 @@ services:
       "-log-level", "info",
       "-cache-size", "50000"
     ]
+
+  web-dashboard:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./logs:/logs
+    environment:
+      - WEB_PORT=8080
+      - DNS_LOG_FILE=/logs/dns-requests.log
+    command: [
+      "./web-dashboard",
+      "-port", "8080",
+      "-log-file", "/logs/dns-requests.log"
+    ]
+    depends_on:
+      - dns-server
+    restart: unless-stopped
 ```
 
 **Note**: This creates both `./logs/dns-requests.log` (JSON) and `./logs/dns-server.log` (readable) files.

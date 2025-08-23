@@ -7,7 +7,6 @@ services:
     volumes:
       - ${LOGS_VOLUME_PATH:-./logs}:/logs
     environment:
-      # Pass environment variables to container
       - DNS_LISTEN=${DNS_LISTEN_ADDRESS:-0.0.0.0}
       - DNS_PORT=${DNS_PORT:-53}
     command: [
@@ -33,6 +32,64 @@ services:
       retries: 3
       start_period: 10s
 
+  api-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+      args:
+        VERSION: ${VERSION:-dev}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    container_name: ${API_CONTAINER_NAME:-dns-go-api}
+    ports:
+      - "${API_HOST_PORT:-8080}:8080"
+    volumes:
+      - ${LOGS_VOLUME_PATH:-./logs}:/logs
+    environment:
+      - API_PORT=8080
+      - DNS_LOG_FILE=${DNS_LOG_FILE:-/logs/dns-requests.log}
+    command: [
+      "./api-server",
+      "-port", "8080",
+      "-log-file", "${DNS_LOG_FILE:-/logs/dns-requests.log}"
+    ]
+    depends_on:
+      - dns-server
+    restart: unless-stopped
+    networks:
+      - dns-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: ${FRONTEND_CONTAINER_NAME:-dns-go-frontend}
+    ports:
+      - "${FRONTEND_HOST_PORT:-3000}:3000"
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+      - WDS_SOCKET_HOST=0.0.0.0
+      - WDS_SOCKET_PORT=0
+      - FAST_REFRESH=false
+    depends_on:
+      - api-server
+    restart: unless-stopped
+    networks:
+      - dns-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
 networks:
   dns-network:
-    driver: bridge 
+    driver: bridge
