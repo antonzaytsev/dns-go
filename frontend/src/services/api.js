@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // Create axios instance with base configuration
 const api = axios.create({
-  baseURL: process.env.API_PORT ? `http://${window.location.hostname}:${process.env.API_PORT}/api` : '/api',
+  baseURL: `http://${window.location.hostname}:${process.env.API_PORT}/api`,
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
