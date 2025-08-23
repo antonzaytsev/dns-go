@@ -3,7 +3,7 @@ import { format } from 'date-fns';
 import { CheckCircle, XCircle, Database, Clock, ExternalLink, Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { dnsApi } from '../services/api';
 
-const RecentRequests = ({ requests }) => {
+const RecentRequests = ({ requests, loading: initialLoading = false }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -11,6 +11,7 @@ const RecentRequests = ({ requests }) => {
   const [currentPage, setCurrentPage] = useState(0);
   const [totalResults, setTotalResults] = useState(0);
   const [searchPerformed, setSearchPerformed] = useState(false);
+  const [searchSource, setSearchSource] = useState(null);
 
   const pageSize = 50;
 
@@ -23,10 +24,18 @@ const RecentRequests = ({ requests }) => {
       const result = await dnsApi.searchLogs(term, pageSize, page * pageSize);
       setSearchResults(result.results || []);
       setTotalResults(result.total || 0);
+      setSearchSource(result.source || 'unknown');
       setCurrentPage(page);
       setSearchPerformed(true);
     } catch (error) {
-      setSearchError('Failed to search logs');
+      // Handle specific error cases
+      if (error.message && error.message.includes('503')) {
+        setSearchError('Search service unavailable. Please check if Elasticsearch is running.');
+      } else if (error.message && error.message.includes('500')) {
+        setSearchError('Search failed due to database error. Please try again.');
+      } else {
+        setSearchError('Failed to search logs. Please check your connection.');
+      }
       setSearchResults([]);
       setTotalResults(0);
     } finally {
@@ -49,6 +58,7 @@ const RecentRequests = ({ requests }) => {
     setCurrentPage(0);
     setTotalResults(0);
     setSearchError(null);
+    setSearchSource(null);
   };
 
   // Pagination handlers
@@ -64,9 +74,10 @@ const RecentRequests = ({ requests }) => {
     }
   };
 
-  const displayRequests = searchPerformed ? searchResults : requests;
+  const displayRequests = searchPerformed ? searchResults : (requests || []);
   const showPagination = searchPerformed && totalResults > pageSize;
   const isShowingSearchResults = searchPerformed;
+  const isLoading = searchLoading || (!searchPerformed && initialLoading);
 
 
 
@@ -168,8 +179,14 @@ const RecentRequests = ({ requests }) => {
               </span>
             )}
           </div>
-          {showPagination && (
-            <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-4">
+            {searchSource === 'elasticsearch' && (
+              <div className="text-xs text-green-600 font-medium">
+                ⚡ Database Search
+              </div>
+            )}
+            {showPagination && (
+              <div className="flex items-center space-x-2">
               <button
                 onClick={prevPage}
                 disabled={currentPage === 0}
@@ -187,16 +204,17 @@ const RecentRequests = ({ requests }) => {
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
-            </div>
-          )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {searchLoading && (
+      {isLoading && (
         <div className="text-center py-8">
           <div className="inline-flex items-center text-gray-600">
             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600 mr-2"></div>
-            Searching...
+            {searchLoading ? 'Searching...' : 'Loading recent requests...'}
           </div>
         </div>
       )}
@@ -232,7 +250,7 @@ const RecentRequests = ({ requests }) => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {displayRequests && displayRequests.length > 0 ? displayRequests.map((request, index) => (
+              {!isLoading && displayRequests && displayRequests.length > 0 ? displayRequests.map((request, index) => (
                 <tr
                   key={request.uuid || index}
                   className="hover:bg-gray-50 transition-colors"
@@ -325,7 +343,7 @@ const RecentRequests = ({ requests }) => {
                     )}
                   </td>
                 </tr>
-              )) : (
+              )) : !isLoading ? (
                 <tr>
                   <td colSpan="8" className="px-4 py-8 text-center text-gray-500">
                     {searchPerformed ? (
@@ -339,7 +357,7 @@ const RecentRequests = ({ requests }) => {
                     )}
                   </td>
                 </tr>
-              )}
+              ) : null}
             </tbody>
           </table>
         </div>

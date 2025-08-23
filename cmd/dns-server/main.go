@@ -99,7 +99,7 @@ func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		logEntry.Status = "malformed_query"
 		logEntry.Duration = types.DurationToMilliseconds(time.Since(start))
 
-		s.logger.LogJSON(logEntry)
+		s.logger.LogDNSEntry(logEntry)
 		s.logger.LogRequestResponse(requestUUID, clientAddr, "MALFORMED", "UNKNOWN",
 			"malformed_query", types.DurationToMilliseconds(time.Since(start)), false, "none")
 		msg := &dns.Msg{}
@@ -137,7 +137,7 @@ func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		logEntry.Answers = types.ExtractAnswers(cachedResp.Answer)
 		logEntry.IPAddresses = types.ExtractIPAddresses(cachedResp.Answer)
 
-		s.logger.LogJSON(logEntry)
+		s.logger.LogDNSEntry(logEntry)
 		s.logger.LogRequestResponse(requestUUID, clientAddr, question.Name,
 			dns.TypeToString[question.Qtype], "cache_hit",
 			types.DurationToMilliseconds(time.Since(start)), true, "cache")
@@ -187,7 +187,7 @@ func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		// Cache the response
 		s.cache.Set(question, result.Response)
 
-		s.logger.LogJSON(logEntry)
+		s.logger.LogDNSEntry(logEntry)
 		s.logger.LogRequestResponse(requestUUID, clientAddr, question.Name,
 			dns.TypeToString[question.Qtype], "success",
 			types.DurationToMilliseconds(time.Since(start)), false, result.Server)

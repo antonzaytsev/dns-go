@@ -1,6 +1,6 @@
 import React from 'react';
 import { RefreshCw, AlertCircle } from 'lucide-react';
-import { useMetrics, useHealth } from '../hooks/useMetrics';
+import { useMetrics, useHealth, useRecentRequests } from '../hooks/useMetrics';
 import OverviewCards from './OverviewCards';
 import Charts from './Charts';
 import QueryTypes from './QueryTypes';
@@ -11,6 +11,7 @@ import ConnectionStatus from './ConnectionStatus';
 const Dashboard = () => {
   const { metrics, loading, error, lastUpdated, refresh } = useMetrics(5000);
   const { isHealthy } = useHealth(30000);
+  const { recentRequests, loading: requestsLoading, error: requestsError } = useRecentRequests(5000);
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -81,7 +82,22 @@ const Dashboard = () => {
 
           {/* Recent Requests */}
           <section>
-            <RecentRequests requests={metrics?.recent_requests} />
+            {requestsError && (
+              <div className="mb-4 bg-red-50 border border-red-200 rounded-md p-4">
+                <div className="flex">
+                  <AlertCircle className="h-5 w-5 text-red-400" />
+                  <div className="ml-3">
+                    <h3 className="text-sm font-medium text-red-800">
+                      Error loading recent requests
+                    </h3>
+                    <div className="mt-2 text-sm text-red-700">
+                      {requestsError}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            <RecentRequests requests={recentRequests} loading={requestsLoading} />
           </section>
         </div>
       </main>

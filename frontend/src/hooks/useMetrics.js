@@ -76,3 +76,49 @@ export const useHealth = (refreshInterval = 30000) => {
     isHealthy: health?.status === 'healthy',
   };
 };
+
+export const useRecentRequests = (refreshInterval = 5000) => {
+  const [recentRequests, setRecentRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
+
+  const fetchRecentRequests = useCallback(async () => {
+    try {
+      setError(null);
+      // Load last 50 requests using empty search query
+      const data = await dnsApi.searchLogs('', 50, 0);
+      setRecentRequests(data.results || []);
+      setLastUpdated(new Date());
+      setLoading(false);
+    } catch (err) {
+      setError(err.message || 'Failed to fetch recent requests');
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Initial fetch
+    fetchRecentRequests();
+
+    // Set up interval for periodic updates
+    const interval = setInterval(fetchRecentRequests, refreshInterval);
+
+    // Cleanup interval on unmount
+    return () => clearInterval(interval);
+  }, [fetchRecentRequests, refreshInterval]);
+
+  // Manual refresh function
+  const refresh = useCallback(() => {
+    setLoading(true);
+    fetchRecentRequests();
+  }, [fetchRecentRequests]);
+
+  return {
+    recentRequests,
+    loading,
+    error,
+    lastUpdated,
+    refresh,
+  };
+};

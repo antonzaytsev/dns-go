@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"dns-go/internal/elasticsearch"
 	"dns-go/internal/metrics"
 	"dns-go/internal/monitor"
 	"dns-go/pkg/version"
@@ -19,6 +20,7 @@ type Server struct {
 	server     *http.Server
 	metrics    *metrics.Metrics
 	logMonitor *monitor.LogMonitor
+	esClient   *elasticsearch.Client
 	port       string
 }
 
@@ -48,9 +50,34 @@ func NewServer(cfg Config) (*Server, error) {
 		fmt.Println("Warning: No DNS log file found. Real-time metrics will not be available.")
 	}
 
+	// Initialize Elasticsearch client if URL is provided
+	var esClient *elasticsearch.Client
+	if esURL := os.Getenv("ELASTICSEARCH_URL"); esURL != "" {
+		esIndex := os.Getenv("ELASTICSEARCH_INDEX")
+		if esIndex == "" {
+			esIndex = "dns-logs"
+		}
+
+		esCfg := elasticsearch.Config{
+			URL:   esURL,
+			Index: esIndex,
+		}
+
+		if client, err := elasticsearch.NewClient(esCfg); err == nil {
+			esClient = client
+			fmt.Println("✅ Elasticsearch client initialized successfully")
+		} else {
+			fmt.Printf("⚠️  Warning: Failed to initialize Elasticsearch client: %v\n", err)
+			fmt.Println("📝 Falling back to file-based log search")
+		}
+	} else {
+		fmt.Println("📝 No Elasticsearch URL provided, using file-based log search")
+	}
+
 	s := &Server{
 		metrics:    metricsCollector,
 		logMonitor: logMonitor,
+		esClient:   esClient,
 		port:       cfg.Port,
 	}
 
@@ -91,11 +118,13 @@ func (s *Server) Start() error {
 	fmt.Printf("\n🌐 Access URLs:\n")
 	fmt.Printf("  Local:    http://localhost:%s/api\n", s.port)
 	fmt.Printf("  Network:  http://0.0.0.0:%s/api\n", s.port)
-	fmt.Printf("\n📊 Log monitoring: %s\n", func() string {
-		if s.logMonitor != nil {
-			return "✅ Active"
+	fmt.Printf("\n📊 Log search: %s\n", func() string {
+		if s.esClient != nil {
+			return "✅ Elasticsearch"
+		} else if s.logMonitor != nil {
+			return "📁 File-based"
 		}
-		return "❌ No log file found"
+		return "❌ Disabled"
 	}())
 	fmt.Printf("========================\n\n")
 
@@ -107,6 +136,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	// Stop log monitor first
 	if s.logMonitor != nil {
 		s.logMonitor.Stop()
+	}
+
+	// Close Elasticsearch client
+	if s.esClient != nil {
+		s.esClient.Close()
 	}
 
 	return s.server.Shutdown(ctx)
@@ -185,27 +219,26 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// If no log monitor, return empty results
-	if s.logMonitor == nil {
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"results": []interface{}{},
-			"total":   0,
-			"limit":   limit,
-			"offset":  offset,
-			"query":   searchTerm,
-		})
+	// Only use Elasticsearch for search - no file fallback
+	if s.esClient == nil {
+		http.Error(w, "Search service unavailable: Elasticsearch not connected", http.StatusServiceUnavailable)
 		return
 	}
 
-	// Perform search
-	results, total := s.logMonitor.SearchLogs(searchTerm, limit, offset)
+	searchResult, err := s.esClient.SearchLogs(searchTerm, limit, offset)
+	if err != nil {
+		fmt.Printf("Elasticsearch search failed: %v\n", err)
+		http.Error(w, "Search failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	response := map[string]interface{}{
-		"results": results,
-		"total":   total,
+		"results": searchResult.Results,
+		"total":   searchResult.Total,
 		"limit":   limit,
 		"offset":  offset,
 		"query":   searchTerm,
+		"source":  "elasticsearch",
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

@@ -10,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"dns-go/internal/elasticsearch"
+	"dns-go/internal/types"
 )
 
 // LogLevel represents different logging levels
@@ -47,6 +50,7 @@ type Logger struct {
 	humanLogger *log.Logger
 	jsonFile    *os.File
 	humanFile   *os.File
+	esClient    *elasticsearch.Client
 }
 
 // New creates a new structured logger
@@ -104,6 +108,30 @@ func NewFromConfig(logFile string, logLevel string) (*Logger, *os.File, *os.File
 		humanLogger: log.New(humanMultiWriter, "", log.LstdFlags|log.Lmicroseconds),
 		jsonFile:    jsonFile,
 		humanFile:   humanFile,
+	}
+
+	// Try to initialize Elasticsearch client
+	if esURL := os.Getenv("ELASTICSEARCH_URL"); esURL != "" {
+		esIndex := os.Getenv("ELASTICSEARCH_INDEX")
+		if esIndex == "" {
+			esIndex = "dns-logs"
+		}
+
+		cfg := elasticsearch.Config{
+			URL:   esURL,
+			Index: esIndex,
+		}
+
+		if esClient, err := elasticsearch.NewClient(cfg); err == nil {
+			logger.esClient = esClient
+		} else {
+			// Log ES initialization failure but don't fail the logger
+			if logger.humanLogger != nil {
+				logger.humanLogger.Printf("Warning: Failed to initialize Elasticsearch client: %v", err)
+			} else {
+				log.Printf("Warning: Failed to initialize Elasticsearch client: %v", err)
+			}
+		}
 	}
 
 	return logger, jsonFile, humanFile, nil
@@ -225,5 +253,25 @@ func (l *Logger) LogRequestResponse(uuid, client, query, qtype, status string, d
 		l.humanLogger.Println(msg)
 	} else {
 		log.Println(msg)
+	}
+}
+
+// LogDNSEntry logs a complete DNS log entry to both file and Elasticsearch
+func (l *Logger) LogDNSEntry(entry types.LogEntry) {
+	// Log to JSON file
+	l.LogJSON(entry)
+
+	// Log to Elasticsearch if available
+	if l.esClient != nil {
+		go func() {
+			if err := l.esClient.IndexLogEntry(entry); err != nil {
+				// Log error but don't block the main logging flow
+				if l.humanLogger != nil {
+					l.humanLogger.Printf("Warning: Failed to index log entry to Elasticsearch: %v", err)
+				} else {
+					log.Printf("Warning: Failed to index log entry to Elasticsearch: %v", err)
+				}
+			}
+		}()
 	}
 }

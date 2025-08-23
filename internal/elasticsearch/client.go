@@ -1,0 +1,410 @@
+package elasticsearch
+
+import (
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"dns-go/internal/types"
+
+	"github.com/elastic/go-elasticsearch/v8"
+	"github.com/elastic/go-elasticsearch/v8/esapi"
+)
+
+const (
+	DefaultURL   = "http://localhost:9200"
+	DefaultIndex = "dns-logs"
+)
+
+// Client wraps the Elasticsearch client with DNS-specific functionality
+type Client struct {
+	es    *elasticsearch.Client
+	index string
+}
+
+// Config holds Elasticsearch configuration
+type Config struct {
+	URL   string
+	Index string
+}
+
+// NewClient creates a new Elasticsearch client
+func NewClient(cfg Config) (*Client, error) {
+	if cfg.URL == "" {
+		cfg.URL = getEnvOrDefault("ELASTICSEARCH_URL", DefaultURL)
+	}
+	if cfg.Index == "" {
+		cfg.Index = getEnvOrDefault("ELASTICSEARCH_INDEX", DefaultIndex)
+	}
+
+	// Configure Elasticsearch client
+	esCfg := elasticsearch.Config{
+		Addresses: []string{cfg.URL},
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
+	es, err := elasticsearch.NewClient(esCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Elasticsearch client: %w", err)
+	}
+
+	client := &Client{
+		es:    es,
+		index: cfg.Index,
+	}
+
+	// Test connection and create index if needed
+	if err := client.initialize(); err != nil {
+		return nil, fmt.Errorf("failed to initialize Elasticsearch: %w", err)
+	}
+
+	return client, nil
+}
+
+// initialize checks connection and sets up the index
+func (c *Client) initialize() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Test connection
+	res, err := c.es.Info(c.es.Info.WithContext(ctx))
+	if err != nil {
+		return fmt.Errorf("failed to connect to Elasticsearch: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return fmt.Errorf("Elasticsearch returned error: %s", res.String())
+	}
+
+	// Create index with mapping if it doesn't exist
+	return c.createIndexIfNotExists(ctx)
+}
+
+// createIndexIfNotExists creates the DNS logs index with proper mapping
+func (c *Client) createIndexIfNotExists(ctx context.Context) error {
+	// Check if index exists
+	res, err := c.es.Indices.Exists([]string{c.index})
+	if err != nil {
+		return fmt.Errorf("failed to check if index exists: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode == 200 {
+		// Index already exists
+		return nil
+	}
+
+	// Create index with mapping optimized for DNS logs
+	mapping := map[string]interface{}{
+		"mappings": map[string]interface{}{
+			"properties": map[string]interface{}{
+				"timestamp": map[string]interface{}{
+					"type": "date",
+				},
+				"uuid": map[string]interface{}{
+					"type": "keyword",
+				},
+				"request": map[string]interface{}{
+					"properties": map[string]interface{}{
+						"client": map[string]interface{}{
+							"type": "keyword",
+						},
+						"query": map[string]interface{}{
+							"type": "text",
+							"fields": map[string]interface{}{
+								"keyword": map[string]interface{}{
+									"type":         "keyword",
+									"ignore_above": 256,
+								},
+							},
+						},
+						"type": map[string]interface{}{
+							"type": "keyword",
+						},
+						"id": map[string]interface{}{
+							"type": "integer",
+						},
+					},
+				},
+				"response": map[string]interface{}{
+					"properties": map[string]interface{}{
+						"upstream": map[string]interface{}{
+							"type": "keyword",
+						},
+						"rcode": map[string]interface{}{
+							"type": "keyword",
+						},
+						"answer_count": map[string]interface{}{
+							"type": "integer",
+						},
+						"rtt_ms": map[string]interface{}{
+							"type": "float",
+						},
+					},
+				},
+				"ip_addresses": map[string]interface{}{
+					"type": "ip",
+				},
+				"status": map[string]interface{}{
+					"type": "keyword",
+				},
+				"total_duration_ms": map[string]interface{}{
+					"type": "float",
+				},
+				"cache_hit": map[string]interface{}{
+					"type": "boolean",
+				},
+			},
+		},
+		"settings": map[string]interface{}{
+			"number_of_shards":   1,
+			"number_of_replicas": 0,
+		},
+	}
+
+	mappingBytes, err := json.Marshal(mapping)
+	if err != nil {
+		return fmt.Errorf("failed to marshal index mapping: %w", err)
+	}
+
+	req := esapi.IndicesCreateRequest{
+		Index: c.index,
+		Body:  strings.NewReader(string(mappingBytes)),
+	}
+
+	res, err = req.Do(ctx, c.es)
+	if err != nil {
+		return fmt.Errorf("failed to create index: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		// Check if it's just a "resource_already_exists_exception" which is fine
+		if res.StatusCode == 400 && strings.Contains(res.String(), "resource_already_exists_exception") {
+			// Index already exists, this is fine
+			return nil
+		}
+		return fmt.Errorf("failed to create index: %s", res.String())
+	}
+
+	return nil
+}
+
+// IndexLogEntry indexes a DNS log entry
+func (c *Client) IndexLogEntry(entry types.LogEntry) error {
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("failed to marshal log entry: %w", err)
+	}
+
+	req := esapi.IndexRequest{
+		Index:      c.index,
+		DocumentID: entry.UUID,
+		Body:       strings.NewReader(string(data)),
+		Refresh:    "false", // Don't refresh immediately for performance
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	res, err := req.Do(ctx, c.es)
+	if err != nil {
+		return fmt.Errorf("failed to index log entry: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return fmt.Errorf("Elasticsearch indexing error: %s", res.String())
+	}
+
+	return nil
+}
+
+// SearchLogEntry represents a search result
+type SearchResult struct {
+	Results []types.LogEntry `json:"results"`
+	Total   int64            `json:"total"`
+}
+
+// SearchLogs searches through DNS logs stored in Elasticsearch
+func (c *Client) SearchLogs(searchTerm string, limit, offset int) (*SearchResult, error) {
+	query := c.buildSearchQuery(searchTerm)
+
+	searchBody := map[string]interface{}{
+		"query": query,
+		"sort": []map[string]interface{}{
+			{
+				"timestamp": map[string]interface{}{
+					"order": "desc",
+				},
+			},
+		},
+		"from": offset,
+		"size": limit,
+	}
+
+	searchBytes, err := json.Marshal(searchBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal search query: %w", err)
+	}
+
+	req := esapi.SearchRequest{
+		Index: []string{c.index},
+		Body:  strings.NewReader(string(searchBytes)),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	res, err := req.Do(ctx, c.es)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search logs: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return nil, fmt.Errorf("Elasticsearch search error: %s", res.String())
+	}
+
+	var response struct {
+		Hits struct {
+			Total struct {
+				Value int64 `json:"value"`
+			} `json:"total"`
+			Hits []struct {
+				Source types.LogEntry `json:"_source"`
+			} `json:"hits"`
+		} `json:"hits"`
+	}
+
+	if err := json.NewDecoder(res.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to decode search response: %w", err)
+	}
+
+	results := make([]types.LogEntry, len(response.Hits.Hits))
+	for i, hit := range response.Hits.Hits {
+		results[i] = hit.Source
+	}
+
+	return &SearchResult{
+		Results: results,
+		Total:   response.Hits.Total.Value,
+	}, nil
+}
+
+// buildSearchQuery constructs an Elasticsearch query based on search term
+func (c *Client) buildSearchQuery(searchTerm string) map[string]interface{} {
+	if searchTerm == "" {
+		return map[string]interface{}{
+			"match_all": map[string]interface{}{},
+		}
+	}
+
+	shouldClauses := []map[string]interface{}{
+		{
+			"match": map[string]interface{}{
+				"request.query": searchTerm,
+			},
+		},
+		{
+			"match": map[string]interface{}{
+				"request.client": searchTerm,
+			},
+		},
+		{
+			"term": map[string]interface{}{
+				"request.type": searchTerm,
+			},
+		},
+		{
+			"term": map[string]interface{}{
+				"status": searchTerm,
+			},
+		},
+		{
+			"term": map[string]interface{}{
+				"response.upstream": searchTerm,
+			},
+		},
+		{
+			"term": map[string]interface{}{
+				"uuid": searchTerm,
+			},
+		},
+	}
+
+	// Only search IP addresses if the search term looks like an IP
+	if isValidIP(searchTerm) {
+		shouldClauses = append(shouldClauses, map[string]interface{}{
+			"terms": map[string]interface{}{
+				"ip_addresses": []string{searchTerm},
+			},
+		})
+	}
+
+	return map[string]interface{}{
+		"bool": map[string]interface{}{
+			"should":               shouldClauses,
+			"minimum_should_match": 1,
+		},
+	}
+}
+
+// isValidIP checks if a string looks like an IP address
+func isValidIP(str string) bool {
+	parts := strings.Split(str, ".")
+	if len(parts) != 4 {
+		return false
+	}
+	for _, part := range parts {
+		if len(part) == 0 || len(part) > 3 {
+			return false
+		}
+		for _, char := range part {
+			if char < '0' || char > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// HealthCheck checks if Elasticsearch is healthy
+func (c *Client) HealthCheck() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	res, err := c.es.Cluster.Health(c.es.Cluster.Health.WithContext(ctx))
+	if err != nil {
+		return fmt.Errorf("failed to check Elasticsearch health: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return fmt.Errorf("Elasticsearch health check failed: %s", res.String())
+	}
+
+	return nil
+}
+
+// Close closes the Elasticsearch client
+func (c *Client) Close() error {
+	// The v8 client doesn't have a Close method, connection cleanup is automatic
+	return nil
+}
+
+// getEnvOrDefault returns environment variable value or default if not set
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}

@@ -73,7 +73,6 @@ type DashboardMetrics struct {
 	TopClients      []ClientMetric            `json:"top_clients"`
 	QueryTypes      map[string]int64          `json:"query_types"`
 	UpstreamServers map[string]*UpstreamStats `json:"upstream_servers"`
-	RecentRequests  []types.LogEntry          `json:"recent_requests"`
 	SystemInfo      SystemInfo                `json:"system_info"`
 }
 
@@ -294,7 +293,6 @@ func (m *Metrics) GetDashboardMetrics(version string) DashboardMetrics {
 		TopClients:      topClients,
 		QueryTypes:      m.queryTypeStats,
 		UpstreamServers: m.upstreamStats,
-		RecentRequests:  m.getRecentRequests(),
 		SystemInfo: SystemInfo{
 			Version:   version,
 			StartTime: m.startTime.Format(time.RFC3339),
