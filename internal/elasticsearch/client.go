@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -309,43 +310,75 @@ func (c *Client) buildSearchQuery(searchTerm string) map[string]interface{} {
 	}
 
 	shouldClauses := []map[string]interface{}{
+		// Substring search in query domain using wildcard
+		{
+			"wildcard": map[string]interface{}{
+				"request.query": map[string]interface{}{
+					"value":            fmt.Sprintf("*%s*", strings.ToLower(searchTerm)),
+					"case_insensitive": true,
+				},
+			},
+		},
+		// Exact and partial match for query domain
 		{
 			"match": map[string]interface{}{
-				"request.query": searchTerm,
+				"request.query": map[string]interface{}{
+					"query":     searchTerm,
+					"fuzziness": "AUTO",
+				},
 			},
 		},
+		// Substring search in client address
 		{
-			"match": map[string]interface{}{
-				"request.client": searchTerm,
+			"wildcard": map[string]interface{}{
+				"request.client": map[string]interface{}{
+					"value":            fmt.Sprintf("*%s*", searchTerm),
+					"case_insensitive": true,
+				},
 			},
 		},
-		{
-			"term": map[string]interface{}{
-				"request.type": searchTerm,
-			},
-		},
-		{
-			"term": map[string]interface{}{
-				"status": searchTerm,
-			},
-		},
+		// Exact match for request type
 		{
 			"term": map[string]interface{}{
-				"response.upstream": searchTerm,
+				"request.type": map[string]interface{}{
+					"value": strings.ToUpper(searchTerm),
+				},
 			},
 		},
+		// Exact match for status
 		{
 			"term": map[string]interface{}{
-				"uuid": searchTerm,
+				"status": map[string]interface{}{
+					"value": strings.ToLower(searchTerm),
+				},
+			},
+		},
+		// Substring search in upstream server
+		{
+			"wildcard": map[string]interface{}{
+				"response.upstream": map[string]interface{}{
+					"value":            fmt.Sprintf("*%s*", searchTerm),
+					"case_insensitive": true,
+				},
+			},
+		},
+		// Exact match for UUID
+		{
+			"term": map[string]interface{}{
+				"uuid": map[string]interface{}{
+					"value": searchTerm,
+				},
 			},
 		},
 	}
 
-	// Only search IP addresses if the search term looks like an IP
-	if isValidIP(searchTerm) {
+	// Add IP address search if it looks like an IP or partial IP
+	if isValidIP(searchTerm) || isPartialIP(searchTerm) {
 		shouldClauses = append(shouldClauses, map[string]interface{}{
-			"terms": map[string]interface{}{
-				"ip_addresses": []string{searchTerm},
+			"wildcard": map[string]interface{}{
+				"ip_addresses": map[string]interface{}{
+					"value": fmt.Sprintf("*%s*", searchTerm),
+				},
 			},
 		})
 	}
@@ -375,6 +408,31 @@ func isValidIP(str string) bool {
 		}
 	}
 	return true
+}
+
+// isPartialIP checks if a string looks like a partial IP address
+func isPartialIP(str string) bool {
+	parts := strings.Split(str, ".")
+	if len(parts) > 4 || len(parts) == 0 {
+		return false
+	}
+
+	for _, part := range parts {
+		if part == "" {
+			continue // Allow empty parts for partial IPs like "192.168."
+		}
+		if len(part) > 3 {
+			return false
+		}
+
+		// Check if part is numeric
+		if _, err := strconv.Atoi(part); err != nil {
+			return false
+		}
+	}
+
+	// Must contain at least one digit and a dot, or be all digits
+	return strings.Contains(str, ".") || (len(str) > 0 && str[0] >= '0' && str[0] <= '9')
 }
 
 // HealthCheck checks if Elasticsearch is healthy
