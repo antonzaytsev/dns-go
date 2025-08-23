@@ -1,6 +1,6 @@
 import React from 'react';
 import { format } from 'date-fns';
-import { CheckCircle, XCircle, Database, Clock } from 'lucide-react';
+import { CheckCircle, XCircle, Database, Clock, ExternalLink } from 'lucide-react';
 
 const RecentRequests = ({ requests }) => {
   if (!requests || requests.length === 0) {
@@ -60,44 +60,114 @@ const RecentRequests = ({ requests }) => {
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
       <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Requests</h3>
-      <div className="max-h-96 overflow-y-auto space-y-3">
-        {requests.slice(0, 20).map((request, index) => (
-          <div
-            key={request.uuid || index}
-            className="border rounded-lg p-4 hover:bg-gray-50 transition-colors"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center space-x-2">
-                {getStatusIcon(request.status)}
-                <span className="font-medium text-gray-900">
-                  {request.request?.query} ({request.request?.type})
-                </span>
-              </div>
-              <span
-                className={`px-2 py-1 text-xs font-medium rounded-full border ${getStatusColor(
-                  request.status
-                )}`}
-              >
-                {getStatusText(request.status)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-sm text-gray-600">
-              <div className="flex items-center space-x-4">
-                <span>Client: {request.request?.client}</span>
-                <span>Duration: {request.total_duration_ms?.toFixed(1)}ms</span>
-              </div>
-              <span>
-                {format(new Date(request.timestamp), 'HH:mm:ss')}
-              </span>
-            </div>
-            {request.response && request.response.upstream !== 'cache' && (
-              <div className="mt-2 text-xs text-gray-500">
-                Upstream: {request.response.upstream} (RTT: {request.response.rtt_ms?.toFixed(1)}ms)
-              </div>
-            )}
-          </div>
-        ))}
+      <div className="overflow-x-auto">
+        <div className="max-h-96 overflow-y-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50 sticky top-0">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Time
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Query
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Type
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Client
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Status
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Duration
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Upstream
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {requests.slice(0, 50).map((request, index) => (
+                <tr
+                  key={request.uuid || index}
+                  className="hover:bg-gray-50 transition-colors"
+                >
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                    {format(new Date(request.timestamp), 'HH:mm:ss')}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-900 max-w-xs truncate">
+                    <div className="flex items-center space-x-1">
+                      <span className="truncate" title={request.request?.query}>
+                        {request.request?.query}
+                      </span>
+                      {request.request?.query && (
+                        <ExternalLink className="h-3 w-3 text-gray-400 flex-shrink-0" />
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                      {request.request?.type || 'A'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                    {request.request?.client?.split(':')[0] || 'Unknown'}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <div className="flex items-center space-x-2">
+                      {getStatusIcon(request.status)}
+                      <span
+                        className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
+                          request.status
+                        )}`}
+                      >
+                        {getStatusText(request.status)}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                    <span className={`font-mono ${
+                      request.total_duration_ms > 100 ? 'text-red-600' : 
+                      request.total_duration_ms > 50 ? 'text-yellow-600' : 
+                      'text-green-600'
+                    }`}>
+                      {request.total_duration_ms?.toFixed(1) || '0.0'}ms
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                    {request.response?.upstream === 'cache' ? (
+                      <div className="flex items-center space-x-1">
+                        <Database className="h-3 w-3 text-blue-500" />
+                        <span className="text-blue-600 font-medium">Cache</span>
+                      </div>
+                    ) : request.response?.upstream ? (
+                      <div className="flex flex-col">
+                        <span className="truncate" title={request.response.upstream}>
+                          {request.response.upstream}
+                        </span>
+                        {request.response.rtt_ms && (
+                          <span className="text-xs text-gray-400">
+                            RTT: {request.response.rtt_ms.toFixed(1)}ms
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-gray-400">-</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
+      {requests.length > 50 && (
+        <div className="mt-4 text-center text-sm text-gray-500">
+          Showing latest 50 of {requests.length} requests
+        </div>
+      )}
     </div>
   );
 };
