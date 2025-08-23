@@ -1,7 +1,6 @@
 services:
   dns-server:
     build: .
-    container_name: ${CONTAINER_NAME:-dns-go-server}
     ports:
       - "${DNS_HOST_PORT:-53}:${DNS_PORT:-53}/udp"
     volumes:
@@ -42,7 +41,6 @@ services:
         VERSION: ${VERSION:-dev}
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
-    container_name: ${API_CONTAINER_NAME:-dns-go-api}
     ports:
       - "${API_HOST_PORT:-8080}:8080"
     volumes:
@@ -74,7 +72,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
-    container_name: ${FRONTEND_CONTAINER_NAME:-dns-go-frontend}
     ports:
       - "${FRONTEND_HOST_PORT:-3000}:3000"
     environment:
@@ -98,7 +95,6 @@ services:
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
-    container_name: ${ELASTIC_CONTAINER_NAME:-dns-go-elasticsearch}
     environment:
       - node.name=dns-elasticsearch
       - cluster.name=dns-cluster
