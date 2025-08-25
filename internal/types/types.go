@@ -3,6 +3,7 @@ package types
 import (
 	"crypto/rand"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -58,6 +59,14 @@ func GenerateRequestUUID() string {
 // DurationToMilliseconds converts time.Duration to milliseconds as float64
 func DurationToMilliseconds(d time.Duration) float64 {
 	return float64(d.Nanoseconds()) / 1e6
+}
+
+func ExtractIPFromAddr(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	return host
 }
 
 // ExtractAnswers parses DNS answer records into structured format

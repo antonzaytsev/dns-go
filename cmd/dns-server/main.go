@@ -74,7 +74,7 @@ func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	default:
 		// Too many concurrent requests, return SERVFAIL
 		s.logger.Warn("Request rate limited", map[string]interface{}{
-			"client": w.RemoteAddr().String(),
+			"client": types.ExtractIPFromAddr(w.RemoteAddr().String()),
 		})
 		msg := &dns.Msg{}
 		msg.SetRcode(r, dns.RcodeServerFailure)
@@ -83,7 +83,7 @@ func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	}
 
 	start := time.Now()
-	clientAddr := w.RemoteAddr().String()
+	clientAddr := types.ExtractIPFromAddr(w.RemoteAddr().String())
 	requestUUID := types.GenerateRequestUUID()
 
 	// Initialize log entry

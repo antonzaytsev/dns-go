@@ -146,7 +146,7 @@ func (m *Metrics) RecordRequest(entry types.LogEntry) {
 	m.cleanOldTimeData()
 
 	// Client statistics
-	clientIP := entry.Request.Client
+	clientIP := types.ExtractIPFromAddr(entry.Request.Client)
 	if stats, exists := m.clientStats[clientIP]; exists {
 		stats.TotalRequests++
 		stats.LastSeen = entry.Timestamp
@@ -232,12 +232,14 @@ func (m *Metrics) RecordRateLimited(clientIP string) {
 
 	m.rateLimited++
 
+	cleanIP := types.ExtractIPFromAddr(clientIP)
+
 	// Update client stats
-	if stats, exists := m.clientStats[clientIP]; exists {
+	if stats, exists := m.clientStats[cleanIP]; exists {
 		stats.TotalRequests++
 		stats.LastSeen = time.Now()
 	} else {
-		m.clientStats[clientIP] = &ClientStats{
+		m.clientStats[cleanIP] = &ClientStats{
 			TotalRequests: 1,
 			LastSeen:      time.Now(),
 		}
