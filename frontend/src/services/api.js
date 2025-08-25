@@ -49,7 +49,7 @@ export const dnsApi = {
   // Get health status
   getHealth: async () => {
     try {
-      const response = await api.get('api//health');
+      const response = await api.get('/api/health');
       return response.data;
     } catch (error) {
       console.error('Failed to fetch health status:', error);
@@ -60,7 +60,7 @@ export const dnsApi = {
   // Get version information
   getVersion: async () => {
     try {
-      const response = await api.get('api//version');
+      const response = await api.get('/api/version');
       return response.data;
     } catch (error) {
       console.error('Failed to fetch version:', error);
@@ -76,7 +76,7 @@ export const dnsApi = {
       params.append('limit', limit.toString());
       params.append('offset', offset.toString());
 
-      const response = await api.get(`api//search?${params.toString()}`);
+      const response = await api.get(`/api/search?${params.toString()}`);
       return response.data;
     } catch (error) {
       console.error('Failed to search logs:', error);
