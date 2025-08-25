@@ -26,6 +26,9 @@ logs/
 # Environment files
 .env
 
+# Custom DNS configuration
+custom-dns.json
+
 # OS generated files
 .DS_Store
 .DS_Store?

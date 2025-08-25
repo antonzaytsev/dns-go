@@ -98,6 +98,8 @@ Usage of ./dns-server:
         DNS cache size (default 10000)
   -cache-ttl duration
         DNS cache TTL (default 5m0s)
+  -custom-dns string
+        Custom DNS mappings in format: domain1=ip1,domain2=ip2 (e.g., server.local=192.168.0.30)
   -listen string
         Listen address (default "0.0.0.0")
   -log string
@@ -115,6 +117,66 @@ Usage of ./dns-server:
   -upstreams string
         Comma-separated list of upstream DNS servers (default "8.8.8.8:53,1.1.1.1:53")
 ```
+
+### Custom DNS Configuration
+
+The DNS server supports custom local DNS mappings through a configuration file. This is useful for resolving internal network devices or local services.
+
+#### Configuration File Setup
+
+1. Create a `custom-dns.json` file in the same directory as the DNS server binary
+2. Add your custom domain mappings in JSON format
+3. The file will be automatically loaded on server startup
+
+**Example `custom-dns.json`:**
+```json
+{
+  "mappings": {
+    "server.local": "192.168.0.30",
+    "api.local": "192.168.0.31",
+    "db.local": "192.168.0.32",
+    "nas.local": "192.168.0.50",
+    "router.local": "192.168.0.1"
+  }
+}
+```
+
+#### Features
+
+- **File-based Configuration**: Custom mappings loaded from `custom-dns.json`
+- **Automatic Loading**: No restart required when file is added
+- **Priority Resolution**: Custom mappings are resolved before cache and upstream queries
+- **IPv4 Support**: Currently supports A record (IPv4) resolution
+- **Domain Normalization**: Automatically handles domains with or without trailing dots
+- **Git Ignored**: Configuration file is automatically ignored by version control
+
+#### Usage Examples
+
+```bash
+# With custom DNS configuration file
+./dns-server  # Automatically loads custom-dns.json if present
+
+# With command line mappings (for testing)
+./dns-server --custom-dns="test.local=127.0.0.1,dev.local=192.168.1.100"
+
+# Combined with other options
+./dns-server \
+  -port=53 \
+  -log=./logs/dns-requests.log \
+  -custom-dns="server.local=192.168.0.30"
+```
+
+#### Testing Custom DNS
+
+```bash
+# Test your custom domain resolution
+dig @localhost server.local
+
+# Should return your configured IP address
+nslookup server.local 127.0.0.1
+```
+
+**Note**: Custom DNS configuration file (`custom-dns.json`) takes precedence over command-line mappings.
 
 ## Usage Examples
 

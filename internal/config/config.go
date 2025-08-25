@@ -3,8 +3,11 @@
 package config
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -20,6 +23,7 @@ const (
 	defaultTimeout             = 5 * time.Second
 	defaultRetryAttempts       = 3
 	defaultHealthCheckInterval = 30 * time.Second
+	customDNSConfigFile        = "custom-dns.json"
 )
 
 var (
@@ -29,17 +33,23 @@ var (
 
 // Config holds the DNS server configuration
 type Config struct {
-	ListenAddress       string        `json:"listen_address"`
-	Port                string        `json:"port"`
-	UpstreamDNS         []string      `json:"upstream_dns"`
-	LogFile             string        `json:"log_file,omitempty"`
-	LogLevel            string        `json:"log_level"`
-	CacheTTL            time.Duration `json:"cache_ttl"`
-	CacheSize           int           `json:"cache_size"`
-	MaxConcurrent       int           `json:"max_concurrent"`
-	Timeout             time.Duration `json:"timeout"`
-	RetryAttempts       int           `json:"retry_attempts"`
-	HealthCheckInterval time.Duration `json:"health_check_interval"`
+	ListenAddress       string            `json:"listen_address"`
+	Port                string            `json:"port"`
+	UpstreamDNS         []string          `json:"upstream_dns"`
+	CustomDNS           map[string]string `json:"custom_dns,omitempty"`
+	LogFile             string            `json:"log_file,omitempty"`
+	LogLevel            string            `json:"log_level"`
+	CacheTTL            time.Duration     `json:"cache_ttl"`
+	CacheSize           int               `json:"cache_size"`
+	MaxConcurrent       int               `json:"max_concurrent"`
+	Timeout             time.Duration     `json:"timeout"`
+	RetryAttempts       int               `json:"retry_attempts"`
+	HealthCheckInterval time.Duration     `json:"health_check_interval"`
+}
+
+// CustomDNSConfig represents the structure of the custom DNS configuration file
+type CustomDNSConfig struct {
+	Mappings map[string]string `json:"mappings"`
 }
 
 // DefaultConfig returns a configuration with sensible defaults
@@ -48,6 +58,7 @@ func DefaultConfig() *Config {
 		ListenAddress:       defaultListenAddress,
 		Port:                defaultPort,
 		UpstreamDNS:         append([]string(nil), defaultUpstreamDNS...), // Copy slice
+		CustomDNS:           make(map[string]string),
 		LogLevel:            defaultLogLevel,
 		CacheTTL:            defaultCacheTTL,
 		CacheSize:           defaultCacheSize,
@@ -66,6 +77,7 @@ func LoadFromFlags() (*Config, error) {
 	listenAddr := flag.String("listen", cfg.ListenAddress, "Listen address")
 	port := flag.String("port", cfg.Port, "Listen port")
 	upstreams := flag.String("upstreams", strings.Join(cfg.UpstreamDNS, ","), "Comma-separated list of upstream DNS servers")
+	customDNS := flag.String("custom-dns", "", "Custom DNS mappings in format: domain1=ip1,domain2=ip2 (e.g., server.local=192.168.0.30)")
 	logFile := flag.String("log", cfg.LogFile, "Log file path (optional)")
 	logLevel := flag.String("log-level", cfg.LogLevel, "Log level (debug, info, warn, error)")
 	cacheTTL := flag.Duration("cache-ttl", cfg.CacheTTL, "DNS cache TTL")
@@ -95,6 +107,37 @@ func LoadFromFlags() (*Config, error) {
 				cfg.UpstreamDNS = append(cfg.UpstreamDNS, trimmed)
 			}
 		}
+	}
+
+	// Parse custom DNS mappings
+	if strings.TrimSpace(*customDNS) != "" {
+		mappingList := strings.Split(*customDNS, ",")
+		cfg.CustomDNS = make(map[string]string)
+		for _, mapping := range mappingList {
+			mapping = strings.TrimSpace(mapping)
+			if mapping == "" {
+				continue
+			}
+			parts := strings.SplitN(mapping, "=", 2)
+			if len(parts) != 2 {
+				return nil, fmt.Errorf("invalid custom DNS mapping format: %s (expected domain=ip)", mapping)
+			}
+			domain := strings.TrimSpace(parts[0])
+			ip := strings.TrimSpace(parts[1])
+			if domain == "" || ip == "" {
+				return nil, fmt.Errorf("invalid custom DNS mapping format: %s (domain and IP cannot be empty)", mapping)
+			}
+			// Ensure domain ends with a dot for DNS processing
+			if !strings.HasSuffix(domain, ".") {
+				domain += "."
+			}
+			cfg.CustomDNS[domain] = ip
+		}
+	}
+
+	// Load custom DNS mappings from file if it exists
+	if err := cfg.loadCustomDNS(); err != nil {
+		return nil, fmt.Errorf("failed to load custom DNS configuration: %w", err)
 	}
 
 	return cfg, cfg.Validate()
@@ -139,6 +182,64 @@ func (c *Config) Validate() error {
 	}
 	if !validLogLevels[c.LogLevel] {
 		return fmt.Errorf("invalid log level %q, must be one of: debug, info, warn, error", c.LogLevel)
+	}
+
+	return nil
+}
+
+// loadCustomDNS loads custom DNS mappings from the configuration file if it exists
+func (c *Config) loadCustomDNS() error {
+	// Get the path to the custom DNS configuration file
+	configPath := customDNSConfigFile
+	
+	// Check if running from a different directory, try to find the config file relative to executable
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		// Try to find config file in the same directory as the executable
+		execPath, execErr := os.Executable()
+		if execErr == nil {
+			configPath = filepath.Join(filepath.Dir(execPath), customDNSConfigFile)
+		}
+	}
+
+	// Check if the config file exists
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		// File doesn't exist, which is fine - custom DNS feature is disabled
+		return nil
+	}
+
+	// Read the configuration file
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read custom DNS config file %s: %w", configPath, err)
+	}
+
+	// Parse the JSON configuration
+	var customDNSConfig CustomDNSConfig
+	if err := json.Unmarshal(data, &customDNSConfig); err != nil {
+		return fmt.Errorf("failed to parse custom DNS config file %s: %w", configPath, err)
+	}
+
+	// Initialize CustomDNS map if it doesn't exist
+	if c.CustomDNS == nil {
+		c.CustomDNS = make(map[string]string)
+	}
+
+	// Process and normalize the mappings from the config file
+	for domain, ip := range customDNSConfig.Mappings {
+		domain = strings.TrimSpace(domain)
+		ip = strings.TrimSpace(ip)
+		
+		if domain == "" || ip == "" {
+			return fmt.Errorf("invalid custom DNS mapping in config file: empty domain or IP")
+		}
+		
+		// Ensure domain ends with a dot for DNS processing
+		if !strings.HasSuffix(domain, ".") {
+			domain += "."
+		}
+		
+		// Config file mappings take precedence over command line
+		c.CustomDNS[domain] = ip
 	}
 
 	return nil

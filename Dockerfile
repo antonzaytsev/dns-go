@@ -46,8 +46,11 @@ WORKDIR /app
 # Copy DNS server binary from builder stage
 COPY --from=builder /app/dns-server .
 
+# Copy custom DNS configuration if it exists
+COPY --from=builder /app/custom-dns.json* ./
+
 # Change ownership to non-root user
-RUN chown dns:dns /app/dns-server
+RUN chown dns:dns /app/dns-server /app/custom-dns.json* 2>/dev/null || chown dns:dns /app/dns-server
 
 # Switch to non-root user
 USER dns

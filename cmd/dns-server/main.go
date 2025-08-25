@@ -17,6 +17,7 @@ import (
 	"dns-go/internal/cache"
 	"dns-go/internal/config"
 	"dns-go/internal/logging"
+	"dns-go/internal/resolver"
 	"dns-go/internal/types"
 	"dns-go/internal/upstream"
 	"dns-go/pkg/version"
@@ -28,6 +29,7 @@ import (
 type DNSServer struct {
 	config         *config.Config
 	logger         *logging.Logger
+	resolver       *resolver.LocalResolver
 	upstreamMgr    *upstream.Manager
 	cache          *cache.Cache
 	requestLimiter chan struct{}
@@ -38,6 +40,9 @@ type DNSServer struct {
 
 // NewDNSServer creates a new DNS server instance with all improvements
 func NewDNSServer(cfg *config.Config, logger *logging.Logger) *DNSServer {
+	// Create local resolver for custom DNS mappings
+	localResolver := resolver.New(cfg.CustomDNS)
+
 	// Create upstream manager with concurrent query support
 	upstreamMgr := upstream.New(cfg.UpstreamDNS, cfg.Timeout, cfg.RetryAttempts)
 
@@ -50,6 +55,7 @@ func NewDNSServer(cfg *config.Config, logger *logging.Logger) *DNSServer {
 	server := &DNSServer{
 		config:         cfg,
 		logger:         logger,
+		resolver:       localResolver,
 		upstreamMgr:    upstreamMgr,
 		cache:          dnsCache,
 		requestLimiter: requestLimiter,
@@ -115,6 +121,33 @@ func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		Query:  question.Name,
 		Type:   dns.TypeToString[question.Qtype],
 		ID:     r.Id,
+	}
+
+	// Check custom resolver first
+	if customResp := s.resolver.Resolve(question); customResp != nil {
+		logEntry.Status = "custom_resolution"
+		logEntry.Duration = types.DurationToMilliseconds(time.Since(start))
+
+		// Update response ID to match request
+		customResp.Id = r.Id
+
+		// Set response info for custom resolution
+		logEntry.Response = &types.ResponseInfo{
+			Upstream:    "custom",
+			Rcode:       dns.RcodeToString[customResp.Rcode],
+			AnswerCount: len(customResp.Answer),
+			RTT:         0, // Custom resolution, no network RTT
+		}
+
+		logEntry.Answers = types.ExtractAnswers(customResp.Answer)
+		logEntry.IPAddresses = types.ExtractIPAddresses(customResp.Answer)
+
+		s.logger.LogDNSEntry(logEntry)
+		s.logger.LogRequestResponse(requestUUID, clientAddr, question.Name,
+			dns.TypeToString[question.Qtype], "custom_resolution",
+			types.DurationToMilliseconds(time.Since(start)), false, "custom")
+		w.WriteMsg(customResp)
+		return
 	}
 
 	// Check cache first
@@ -388,18 +421,25 @@ func run() error {
 
 	// Log startup information
 	versionInfo := version.Get()
+	startupConfig := map[string]interface{}{
+		"listen":         cfg.ListenAddress + ":" + cfg.Port,
+		"upstreams":      cfg.UpstreamDNS,
+		"log_file":       cfg.LogFile,
+		"log_level":      cfg.LogLevel,
+		"cache_size":     cfg.CacheSize,
+		"cache_ttl":      cfg.CacheTTL.String(),
+		"max_concurrent": cfg.MaxConcurrent,
+		"timeout":        cfg.Timeout.String(),
+	}
+
+	// Add custom DNS mappings if present
+	if len(cfg.CustomDNS) > 0 {
+		startupConfig["custom_dns_mappings"] = cfg.CustomDNS
+	}
+
 	logger.Info("DNS Proxy Server starting", map[string]interface{}{
 		"version": versionInfo.String(),
-		"config": map[string]interface{}{
-			"listen":         cfg.ListenAddress + ":" + cfg.Port,
-			"upstreams":      cfg.UpstreamDNS,
-			"log_file":       cfg.LogFile,
-			"log_level":      cfg.LogLevel,
-			"cache_size":     cfg.CacheSize,
-			"cache_ttl":      cfg.CacheTTL.String(),
-			"max_concurrent": cfg.MaxConcurrent,
-			"timeout":        cfg.Timeout.String(),
-		},
+		"config":  startupConfig,
 	})
 
 	// Start server
