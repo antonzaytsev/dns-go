@@ -236,8 +236,8 @@ type SearchResult struct {
 }
 
 // SearchLogs searches through DNS logs stored in Elasticsearch
-func (c *Client) SearchLogs(searchTerm string, limit, offset int) (*SearchResult, error) {
-	query := c.buildSearchQuery(searchTerm)
+func (c *Client) SearchLogs(searchTerm string, limit, offset int, lastMinutes *int) (*SearchResult, error) {
+	query := c.buildSearchQuery(searchTerm, lastMinutes)
 
 	searchBody := map[string]interface{}{
 		"query": query,
@@ -301,94 +301,128 @@ func (c *Client) SearchLogs(searchTerm string, limit, offset int) (*SearchResult
 	}, nil
 }
 
-// buildSearchQuery constructs an Elasticsearch query based on search term
-func (c *Client) buildSearchQuery(searchTerm string) map[string]interface{} {
+// buildSearchQuery constructs an Elasticsearch query based on search term and time filter
+func (c *Client) buildSearchQuery(searchTerm string, lastMinutes *int) map[string]interface{} {
+	var query map[string]interface{}
+
+	// Build the main query (text search)
 	if searchTerm == "" {
-		return map[string]interface{}{
+		query = map[string]interface{}{
 			"match_all": map[string]interface{}{},
+		}
+	} else {
+		shouldClauses := []map[string]interface{}{
+			// Substring search in query domain using wildcard
+			{
+				"wildcard": map[string]interface{}{
+					"request.query": map[string]interface{}{
+						"value":            fmt.Sprintf("*%s*", strings.ToLower(searchTerm)),
+						"case_insensitive": true,
+					},
+				},
+			},
+			// Exact and partial match for query domain
+			{
+				"match": map[string]interface{}{
+					"request.query": map[string]interface{}{
+						"query":     searchTerm,
+						"fuzziness": "AUTO",
+					},
+				},
+			},
+			// Substring search in client address
+			{
+				"wildcard": map[string]interface{}{
+					"request.client": map[string]interface{}{
+						"value":            fmt.Sprintf("*%s*", searchTerm),
+						"case_insensitive": true,
+					},
+				},
+			},
+			// Exact match for request type
+			{
+				"term": map[string]interface{}{
+					"request.type": map[string]interface{}{
+						"value": strings.ToUpper(searchTerm),
+					},
+				},
+			},
+			// Exact match for status
+			{
+				"term": map[string]interface{}{
+					"status": map[string]interface{}{
+						"value": strings.ToLower(searchTerm),
+					},
+				},
+			},
+			// Substring search in upstream server
+			{
+				"wildcard": map[string]interface{}{
+					"response.upstream": map[string]interface{}{
+						"value":            fmt.Sprintf("*%s*", searchTerm),
+						"case_insensitive": true,
+					},
+				},
+			},
+			// Exact match for UUID
+			{
+				"term": map[string]interface{}{
+					"uuid": map[string]interface{}{
+						"value": searchTerm,
+					},
+				},
+			},
+		}
+
+		// Add IP address search if it looks like an IP or partial IP
+		if isValidIP(searchTerm) || isPartialIP(searchTerm) {
+			shouldClauses = append(shouldClauses, map[string]interface{}{
+				"wildcard": map[string]interface{}{
+					"ip_addresses": map[string]interface{}{
+						"value": fmt.Sprintf("*%s*", searchTerm),
+					},
+				},
+			})
+		}
+
+		query = map[string]interface{}{
+			"bool": map[string]interface{}{
+				"should":               shouldClauses,
+				"minimum_should_match": 1,
+			},
 		}
 	}
 
-	shouldClauses := []map[string]interface{}{
-		// Substring search in query domain using wildcard
-		{
-			"wildcard": map[string]interface{}{
-				"request.query": map[string]interface{}{
-					"value":            fmt.Sprintf("*%s*", strings.ToLower(searchTerm)),
-					"case_insensitive": true,
+	// Add time filter if specified
+	if lastMinutes != nil && *lastMinutes > 0 {
+		now := time.Now()
+		fromTime := now.Add(-time.Duration(*lastMinutes) * time.Minute)
+
+		timeFilter := map[string]interface{}{
+			"range": map[string]interface{}{
+				"timestamp": map[string]interface{}{
+					"gte": fromTime.Format(time.RFC3339),
+					"lte": now.Format(time.RFC3339),
 				},
 			},
-		},
-		// Exact and partial match for query domain
-		{
-			"match": map[string]interface{}{
-				"request.query": map[string]interface{}{
-					"query":     searchTerm,
-					"fuzziness": "AUTO",
+		}
+
+		// Combine text search query with time filter
+		if query != nil {
+			query = map[string]interface{}{
+				"bool": map[string]interface{}{
+					"must": []map[string]interface{}{
+						query,
+						timeFilter,
+					},
 				},
-			},
-		},
-		// Substring search in client address
-		{
-			"wildcard": map[string]interface{}{
-				"request.client": map[string]interface{}{
-					"value":            fmt.Sprintf("*%s*", searchTerm),
-					"case_insensitive": true,
-				},
-			},
-		},
-		// Exact match for request type
-		{
-			"term": map[string]interface{}{
-				"request.type": map[string]interface{}{
-					"value": strings.ToUpper(searchTerm),
-				},
-			},
-		},
-		// Exact match for status
-		{
-			"term": map[string]interface{}{
-				"status": map[string]interface{}{
-					"value": strings.ToLower(searchTerm),
-				},
-			},
-		},
-		// Substring search in upstream server
-		{
-			"wildcard": map[string]interface{}{
-				"response.upstream": map[string]interface{}{
-					"value":            fmt.Sprintf("*%s*", searchTerm),
-					"case_insensitive": true,
-				},
-			},
-		},
-		// Exact match for UUID
-		{
-			"term": map[string]interface{}{
-				"uuid": map[string]interface{}{
-					"value": searchTerm,
-				},
-			},
-		},
+			}
+		} else {
+			query = timeFilter
+		}
 	}
 
-	// Add IP address search if it looks like an IP or partial IP
-	if isValidIP(searchTerm) || isPartialIP(searchTerm) {
-		shouldClauses = append(shouldClauses, map[string]interface{}{
-			"wildcard": map[string]interface{}{
-				"ip_addresses": map[string]interface{}{
-					"value": fmt.Sprintf("*%s*", searchTerm),
-				},
-			},
-		})
-	}
-
-	return map[string]interface{}{
-		"bool": map[string]interface{}{
-			"should":               shouldClauses,
-			"minimum_should_match": 1,
-		},
-	}
+	return query
 }
 
 // isValidIP checks if a string looks like an IP address

@@ -202,10 +202,12 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	searchTerm := query.Get("q")
 	limitStr := query.Get("limit")
 	offsetStr := query.Get("offset")
+	lastMinutesStr := query.Get("last_minutes")
 
 	// Set defaults
 	limit := 100
 	offset := 0
+	var lastMinutes *int
 
 	if limitStr != "" {
 		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 1000 {
@@ -219,13 +221,23 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Parse and validate last_minutes parameter (1-10 minutes inclusive)
+	if lastMinutesStr != "" {
+		if lm, err := strconv.Atoi(lastMinutesStr); err == nil && lm >= 1 && lm <= 10 {
+			lastMinutes = &lm
+		} else {
+			http.Error(w, "Invalid last_minutes parameter: must be between 1 and 10", http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Only use Elasticsearch for search - no file fallback
 	if s.esClient == nil {
 		http.Error(w, "Search service unavailable: Elasticsearch not connected", http.StatusServiceUnavailable)
 		return
 	}
 
-	searchResult, err := s.esClient.SearchLogs(searchTerm, limit, offset)
+	searchResult, err := s.esClient.SearchLogs(searchTerm, limit, offset, lastMinutes)
 	if err != nil {
 		fmt.Printf("Elasticsearch search failed: %v\n", err)
 		http.Error(w, "Search failed: "+err.Error(), http.StatusInternalServerError)
@@ -233,12 +245,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"results": searchResult.Results,
-		"total":   searchResult.Total,
-		"limit":   limit,
-		"offset":  offset,
-		"query":   searchTerm,
-		"source":  "elasticsearch",
+		"results":      searchResult.Results,
+		"total":        searchResult.Total,
+		"limit":        limit,
+		"offset":       offset,
+		"query":        searchTerm,
+		"last_minutes": lastMinutes,
+		"source":       "elasticsearch",
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

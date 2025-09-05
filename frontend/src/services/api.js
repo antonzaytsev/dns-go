@@ -69,12 +69,15 @@ export const dnsApi = {
   },
 
   // Search DNS logs
-  searchLogs: async (searchTerm, limit = 100, offset = 0) => {
+  searchLogs: async (searchTerm, limit = 100, offset = 0, lastMinutes = null) => {
     try {
       const params = new URLSearchParams();
       if (searchTerm) params.append('q', searchTerm);
       params.append('limit', limit.toString());
       params.append('offset', offset.toString());
+      if (lastMinutes !== null && lastMinutes >= 1 && lastMinutes <= 10) {
+        params.append('last_minutes', lastMinutes.toString());
+      }
 
       const response = await api.get(`/api/search?${params.toString()}`);
       return response.data;
