@@ -202,12 +202,12 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	searchTerm := query.Get("q")
 	limitStr := query.Get("limit")
 	offsetStr := query.Get("offset")
-	lastMinutesStr := query.Get("last_minutes")
+	sinceStr := query.Get("since")
 
 	// Set defaults
 	limit := 100
 	offset := 0
-	var lastMinutes *int
+	var since *time.Time
 
 	if limitStr != "" {
 		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 1000 {
@@ -221,14 +221,21 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Parse and validate last_minutes parameter (1-10 minutes inclusive)
-	if lastMinutesStr != "" {
-		if lm, err := strconv.Atoi(lastMinutesStr); err == nil && lm >= 1 && lm <= 10 {
-			lastMinutes = &lm
-		} else {
-			http.Error(w, "Invalid last_minutes parameter: must be between 1 and 10", http.StatusBadRequest)
+	// Parse and validate since parameter (only format: 2024-01-02T15:04:05Z)
+	if sinceStr != "" {
+		parsedTime, err := time.Parse("2006-01-02T15:04:05Z", sinceStr)
+		if err != nil {
+			http.Error(w, "Invalid since parameter: must be in format 2024-01-02T15:04:05Z", http.StatusBadRequest)
 			return
 		}
+
+		// Validate that the timestamp is not in the future
+		if parsedTime.After(time.Now()) {
+			http.Error(w, "Invalid since parameter: timestamp cannot be in the future", http.StatusBadRequest)
+			return
+		}
+
+		since = &parsedTime
 	}
 
 	// Only use Elasticsearch for search - no file fallback
@@ -237,7 +244,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	searchResult, err := s.esClient.SearchLogs(searchTerm, limit, offset, lastMinutes)
+	searchResult, err := s.esClient.SearchLogs(searchTerm, limit, offset, since)
 	if err != nil {
 		fmt.Printf("Elasticsearch search failed: %v\n", err)
 		http.Error(w, "Search failed: "+err.Error(), http.StatusInternalServerError)
@@ -245,13 +252,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"results":      searchResult.Results,
-		"total":        searchResult.Total,
-		"limit":        limit,
-		"offset":       offset,
-		"query":        searchTerm,
-		"last_minutes": lastMinutes,
-		"source":       "elasticsearch",
+		"results": searchResult.Results,
+		"total":   searchResult.Total,
+		"limit":   limit,
+		"offset":  offset,
+		"query":   searchTerm,
+		"since":   since,
+		"source":  "elasticsearch",
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {

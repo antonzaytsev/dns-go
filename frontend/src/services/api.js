@@ -69,14 +69,23 @@ export const dnsApi = {
   },
 
   // Search DNS logs
-  searchLogs: async (searchTerm, limit = 100, offset = 0, lastMinutes = null) => {
+  searchLogs: async (searchTerm, limit = 100, offset = 0, since = null) => {
     try {
       const params = new URLSearchParams();
       if (searchTerm) params.append('q', searchTerm);
       params.append('limit', limit.toString());
       params.append('offset', offset.toString());
-      if (lastMinutes !== null && lastMinutes >= 1 && lastMinutes <= 10) {
-        params.append('last_minutes', lastMinutes.toString());
+      
+      if (since !== null) {
+        // Accept Date objects or ISO strings (server expects format: 2024-01-02T15:04:05Z)
+        let sinceStr;
+        if (since instanceof Date) {
+          // Convert to required format: 2024-01-02T15:04:05Z
+          sinceStr = since.toISOString().replace(/\.\d{3}Z$/, 'Z');
+        } else {
+          sinceStr = since;
+        }
+        params.append('since', sinceStr);
       }
 
       const response = await api.get(`/api/search?${params.toString()}`);

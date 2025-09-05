@@ -236,8 +236,8 @@ type SearchResult struct {
 }
 
 // SearchLogs searches through DNS logs stored in Elasticsearch
-func (c *Client) SearchLogs(searchTerm string, limit, offset int, lastMinutes *int) (*SearchResult, error) {
-	query := c.buildSearchQuery(searchTerm, lastMinutes)
+func (c *Client) SearchLogs(searchTerm string, limit, offset int, since *time.Time) (*SearchResult, error) {
+	query := c.buildSearchQuery(searchTerm, since)
 
 	searchBody := map[string]interface{}{
 		"query": query,
@@ -302,7 +302,7 @@ func (c *Client) SearchLogs(searchTerm string, limit, offset int, lastMinutes *i
 }
 
 // buildSearchQuery constructs an Elasticsearch query based on search term and time filter
-func (c *Client) buildSearchQuery(searchTerm string, lastMinutes *int) map[string]interface{} {
+func (c *Client) buildSearchQuery(searchTerm string, since *time.Time) map[string]interface{} {
 	var query map[string]interface{}
 
 	// Build the main query (text search)
@@ -394,14 +394,12 @@ func (c *Client) buildSearchQuery(searchTerm string, lastMinutes *int) map[strin
 	}
 
 	// Add time filter if specified
-	if lastMinutes != nil && *lastMinutes > 0 {
+	if since != nil {
 		now := time.Now()
-		fromTime := now.Add(-time.Duration(*lastMinutes) * time.Minute)
-
 		timeFilter := map[string]interface{}{
 			"range": map[string]interface{}{
 				"timestamp": map[string]interface{}{
-					"gte": fromTime.Format(time.RFC3339),
+					"gte": since.Format(time.RFC3339),
 					"lte": now.Format(time.RFC3339),
 				},
 			},
