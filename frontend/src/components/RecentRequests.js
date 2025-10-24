@@ -256,7 +256,10 @@ const RecentRequests = ({ requests, loading: initialLoading = false }) => {
                   className="hover:bg-gray-50 transition-colors"
                 >
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                    {format(new Date(request.timestamp), 'HH:mm:ss')}
+                    <div className="flex flex-col">
+                      <span className="font-medium">{format(new Date(request.timestamp), 'MM/dd/yyyy')}</span>
+                      <span className="text-xs text-gray-600">{format(new Date(request.timestamp), 'HH:mm:ss')}</span>
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-900 max-w-xs truncate">
                     <div className="flex items-center space-x-1">
