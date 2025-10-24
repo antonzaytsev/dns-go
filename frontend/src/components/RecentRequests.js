@@ -84,6 +84,7 @@ const RecentRequests = ({ requests, loading: initialLoading = false }) => {
   const getStatusIcon = (status) => {
     switch (status) {
       case 'success':
+      case 'custom_resolution':
         return <CheckCircle className="h-4 w-4 text-green-500" />;
       case 'cache_hit':
         return <Database className="h-4 w-4 text-blue-500" />;
@@ -98,6 +99,7 @@ const RecentRequests = ({ requests, loading: initialLoading = false }) => {
   const getStatusText = (status) => {
     switch (status) {
       case 'success':
+      case 'custom_resolution':
         return 'Success';
       case 'cache_hit':
         return 'Cache Hit';
@@ -113,6 +115,7 @@ const RecentRequests = ({ requests, loading: initialLoading = false }) => {
   const getStatusColor = (status) => {
     switch (status) {
       case 'success':
+      case 'custom_resolution':
         return 'bg-green-100 text-green-800 border-green-200';
       case 'cache_hit':
         return 'bg-blue-100 text-blue-800 border-blue-200';
