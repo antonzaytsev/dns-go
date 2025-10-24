@@ -132,3 +132,9 @@ export interface TimeSeriesData {
 export interface ChartsProps {
   timeSeriesData?: TimeSeriesData | null;
 }
+
+export interface ConnectionStatusProps {
+  isOnline: boolean;
+  lastUpdated?: Date | null;
+  error?: string | null;
+}

@@ -5,7 +5,7 @@ import OverviewCards from './OverviewCards';
 import Charts from './Charts.tsx';
 import QueryTypes from './QueryTypes';
 import TopClients from './TopClients.tsx';
-import ConnectionStatus from './ConnectionStatus';
+import ConnectionStatus from './ConnectionStatus.tsx';
 import Navigation from './Navigation';
 
 const Dashboard: React.FC = () => {

@@ -1,28 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { Wifi, WifiOff, AlertCircle } from 'lucide-react';
+import { Wifi, WifiOff, AlertCircle, LucideIcon } from 'lucide-react';
+import type { ConnectionStatusProps } from '../types';
 
-const ConnectionStatus = ({ isOnline, lastUpdated, error }) => {
-  const [showDetails, setShowDetails] = useState(false);
+const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ isOnline, lastUpdated, error }) => {
+  const [showDetails, setShowDetails] = useState<boolean>(false);
 
   // Auto-hide error details after 5 seconds
   useEffect(() => {
     if (error && showDetails) {
-      const timer = setTimeout(() => setShowDetails(false), 5000);
+      const timer: NodeJS.Timeout = setTimeout(() => setShowDetails(false), 5000);
       return () => clearTimeout(timer);
     }
   }, [error, showDetails]);
 
-  const getStatusColor = () => {
+  const getStatusColor = (): string => {
     if (error) return 'text-red-500';
     return isOnline ? 'text-green-500' : 'text-gray-400';
   };
 
-  const getStatusText = () => {
+  const getStatusText = (): string => {
     if (error) return 'Error';
     return isOnline ? 'Connected' : 'Connecting...';
   };
 
-  const StatusIcon = error ? AlertCircle : (isOnline ? Wifi : WifiOff);
+  const StatusIcon: LucideIcon = error ? AlertCircle : (isOnline ? Wifi : WifiOff);
 
   return (
     <div className="flex items-center space-x-2">
