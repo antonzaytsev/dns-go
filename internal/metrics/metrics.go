@@ -25,8 +25,10 @@ type Metrics struct {
 	malformedQueries  int64
 
 	// Time-based metrics
-	requestsLastHour map[int64]int64 // timestamp -> count
-	requestsLastDay  map[int64]int64 // timestamp -> count
+	requestsLastHour  map[int64]int64 // timestamp -> count (per minute)
+	requestsLastDay   map[int64]int64 // timestamp -> count (per hour)
+	requestsLastWeek  map[int64]int64 // timestamp -> count (per day)
+	requestsLastMonth map[int64]int64 // timestamp -> count (per day)
 
 	// Client statistics
 	clientStats map[string]*ClientStats
@@ -89,8 +91,10 @@ type OverviewMetrics struct {
 
 // TimeSeriesData holds time-based metrics for charts
 type TimeSeriesData struct {
-	RequestsLastHour []TimePoint `json:"requests_last_hour"`
-	RequestsLastDay  []TimePoint `json:"requests_last_day"`
+	RequestsLastHour  []TimePoint `json:"requests_last_hour"`
+	RequestsLastDay   []TimePoint `json:"requests_last_day"`
+	RequestsLastWeek  []TimePoint `json:"requests_last_week"`
+	RequestsLastMonth []TimePoint `json:"requests_last_month"`
 }
 
 // TimePoint represents a data point in time series
@@ -117,14 +121,16 @@ type SystemInfo struct {
 // NewMetrics creates a new metrics collector
 func NewMetrics() *Metrics {
 	return &Metrics{
-		startTime:        time.Now(),
-		requestsLastHour: make(map[int64]int64),
-		requestsLastDay:  make(map[int64]int64),
-		clientStats:      make(map[string]*ClientStats),
-		queryTypeStats:   make(map[string]int64),
-		upstreamStats:    make(map[string]*UpstreamStats),
-		recentRequests:   make([]types.LogEntry, 0),
-		maxRecentSize:    100, // Keep last 100 requests
+		startTime:         time.Now(),
+		requestsLastHour:  make(map[int64]int64),
+		requestsLastDay:   make(map[int64]int64),
+		requestsLastWeek:  make(map[int64]int64),
+		requestsLastMonth: make(map[int64]int64),
+		clientStats:       make(map[string]*ClientStats),
+		queryTypeStats:    make(map[string]int64),
+		upstreamStats:     make(map[string]*UpstreamStats),
+		recentRequests:    make([]types.LogEntry, 0),
+		maxRecentSize:     100, // Keep last 100 requests
 	}
 }
 
@@ -135,14 +141,17 @@ func (m *Metrics) RecordRequest(entry types.LogEntry) {
 
 	m.totalRequests++
 
-	// Time-based metrics (rounded to minutes for aggregation)
-	hourKey := entry.Timestamp.Truncate(time.Minute).Unix()
-	dayKey := entry.Timestamp.Truncate(time.Hour).Unix()
+	// Time-based metrics with different granularities
+	minuteKey := entry.Timestamp.Truncate(time.Minute).Unix() // Per minute for last hour
+	hourKey := entry.Timestamp.Truncate(time.Hour).Unix()     // Per hour for last day
+	dayKey := entry.Timestamp.Truncate(24 * time.Hour).Unix() // Per day for last week/month
 
-	m.requestsLastHour[hourKey]++
-	m.requestsLastDay[dayKey]++
+	m.requestsLastHour[minuteKey]++
+	m.requestsLastDay[hourKey]++
+	m.requestsLastWeek[dayKey]++
+	m.requestsLastMonth[dayKey]++
 
-	// Clean old data (keep last hour and day)
+	// Clean old data
 	m.cleanOldTimeData()
 
 	// Client statistics
@@ -331,27 +340,55 @@ func (m *Metrics) LoadFromLogFile(logFilePath string) error {
 func (m *Metrics) cleanOldTimeData() {
 	now := time.Now()
 
-	// Clean hour data (keep last 2 hours)
-	cutoffHour := now.Add(-2 * time.Hour).Truncate(time.Minute).Unix()
+	// Clean minute data (keep last 2 hours)
+	cutoffMinute := now.Add(-2 * time.Hour).Truncate(time.Minute).Unix()
 	for timestamp := range m.requestsLastHour {
-		if timestamp < cutoffHour {
+		if timestamp < cutoffMinute {
 			delete(m.requestsLastHour, timestamp)
 		}
 	}
 
-	// Clean day data (keep last 2 days)
-	cutoffDay := now.Add(-48 * time.Hour).Truncate(time.Hour).Unix()
+	// Clean hour data (keep last 2 days)
+	cutoffHour := now.Add(-48 * time.Hour).Truncate(time.Hour).Unix()
 	for timestamp := range m.requestsLastDay {
-		if timestamp < cutoffDay {
+		if timestamp < cutoffHour {
 			delete(m.requestsLastDay, timestamp)
+		}
+	}
+
+	// Clean week data (keep last 2 weeks)
+	cutoffWeek := now.Add(-14 * 24 * time.Hour).Truncate(24 * time.Hour).Unix()
+	for timestamp := range m.requestsLastWeek {
+		if timestamp < cutoffWeek {
+			delete(m.requestsLastWeek, timestamp)
+		}
+	}
+
+	// Clean month data (keep last 2 months)
+	cutoffMonth := now.Add(-60 * 24 * time.Hour).Truncate(24 * time.Hour).Unix()
+	for timestamp := range m.requestsLastMonth {
+		if timestamp < cutoffMonth {
+			delete(m.requestsLastMonth, timestamp)
 		}
 	}
 }
 
 func (m *Metrics) getTimeSeriesData() TimeSeriesData {
-	// Convert hour data to sorted slice
-	hourPoints := make([]TimePoint, 0, len(m.requestsLastHour))
+	// Convert minute data to sorted slice (for last hour view)
+	minutePoints := make([]TimePoint, 0, len(m.requestsLastHour))
 	for timestamp, count := range m.requestsLastHour {
+		minutePoints = append(minutePoints, TimePoint{
+			Timestamp: timestamp * 1000, // Convert to milliseconds for JavaScript
+			Value:     count,
+		})
+	}
+	sort.Slice(minutePoints, func(i, j int) bool {
+		return minutePoints[i].Timestamp < minutePoints[j].Timestamp
+	})
+
+	// Convert hour data to sorted slice (for last day view)
+	hourPoints := make([]TimePoint, 0, len(m.requestsLastDay))
+	for timestamp, count := range m.requestsLastDay {
 		hourPoints = append(hourPoints, TimePoint{
 			Timestamp: timestamp * 1000, // Convert to milliseconds for JavaScript
 			Value:     count,
@@ -361,21 +398,35 @@ func (m *Metrics) getTimeSeriesData() TimeSeriesData {
 		return hourPoints[i].Timestamp < hourPoints[j].Timestamp
 	})
 
-	// Convert day data to sorted slice
-	dayPoints := make([]TimePoint, 0, len(m.requestsLastDay))
-	for timestamp, count := range m.requestsLastDay {
-		dayPoints = append(dayPoints, TimePoint{
+	// Convert day data to sorted slice (for last week view)
+	weekPoints := make([]TimePoint, 0, len(m.requestsLastWeek))
+	for timestamp, count := range m.requestsLastWeek {
+		weekPoints = append(weekPoints, TimePoint{
 			Timestamp: timestamp * 1000, // Convert to milliseconds for JavaScript
 			Value:     count,
 		})
 	}
-	sort.Slice(dayPoints, func(i, j int) bool {
-		return dayPoints[i].Timestamp < dayPoints[j].Timestamp
+	sort.Slice(weekPoints, func(i, j int) bool {
+		return weekPoints[i].Timestamp < weekPoints[j].Timestamp
+	})
+
+	// Convert day data to sorted slice (for last month view)
+	monthPoints := make([]TimePoint, 0, len(m.requestsLastMonth))
+	for timestamp, count := range m.requestsLastMonth {
+		monthPoints = append(monthPoints, TimePoint{
+			Timestamp: timestamp * 1000, // Convert to milliseconds for JavaScript
+			Value:     count,
+		})
+	}
+	sort.Slice(monthPoints, func(i, j int) bool {
+		return monthPoints[i].Timestamp < monthPoints[j].Timestamp
 	})
 
 	return TimeSeriesData{
-		RequestsLastHour: hourPoints,
-		RequestsLastDay:  dayPoints,
+		RequestsLastHour:  minutePoints,
+		RequestsLastDay:   hourPoints,
+		RequestsLastWeek:  weekPoints,
+		RequestsLastMonth: monthPoints,
 	}
 }
 

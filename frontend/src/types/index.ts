@@ -151,6 +151,8 @@ export interface TimeSeriesDataPoint {
 export interface TimeSeriesData {
   requests_last_hour?: TimeSeriesDataPoint[];
   requests_last_day?: TimeSeriesDataPoint[];
+  requests_last_week?: TimeSeriesDataPoint[];
+  requests_last_month?: TimeSeriesDataPoint[];
 }
 
 export interface ChartsProps {
