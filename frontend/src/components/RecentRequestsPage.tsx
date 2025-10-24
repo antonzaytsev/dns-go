@@ -1,7 +1,7 @@
 import React from 'react';
 import { AlertCircle } from 'lucide-react';
 import { useRecentRequests } from '../hooks/useMetrics';
-import RecentRequests from './RecentRequests';
+import RecentRequests from './RecentRequests.tsx';
 import Navigation from './Navigation';
 
 interface DnsRequest {
