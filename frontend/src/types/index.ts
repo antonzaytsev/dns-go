@@ -117,3 +117,18 @@ export interface UseRecentRequestsReturn {
   lastUpdated: Date | null;
   refresh: () => void;
 }
+
+// Time series data interfaces
+export interface TimeSeriesDataPoint {
+  timestamp: string;
+  value: number;
+}
+
+export interface TimeSeriesData {
+  requests_last_hour?: TimeSeriesDataPoint[];
+  requests_last_day?: TimeSeriesDataPoint[];
+}
+
+export interface ChartsProps {
+  timeSeriesData?: TimeSeriesData | null;
+}

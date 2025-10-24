@@ -9,9 +9,11 @@ import {
   Title,
   Tooltip,
   Legend,
+  ChartOptions,
 } from 'chart.js';
 import { Line, Bar } from 'react-chartjs-2';
 import { format } from 'date-fns';
+import type { ChartsProps, TimeSeriesDataPoint } from '../types';
 
 ChartJS.register(
   CategoryScale,
@@ -24,7 +26,7 @@ ChartJS.register(
   Legend
 );
 
-const chartOptions = {
+const chartOptions: ChartOptions<'line' | 'bar'> = {
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
@@ -56,7 +58,7 @@ const chartOptions = {
   },
 };
 
-const Charts = ({ timeSeriesData }) => {
+const Charts: React.FC<ChartsProps> = ({ timeSeriesData }) => {
   if (!timeSeriesData) {
     return (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -81,16 +83,16 @@ const Charts = ({ timeSeriesData }) => {
   }
 
   // Process hourly data
-  const hourlyData = timeSeriesData.requests_last_hour || [];
+  const hourlyData: TimeSeriesDataPoint[] = timeSeriesData.requests_last_hour || [];
   const hourlyChartData = {
-    labels: hourlyData.map(point => {
+    labels: hourlyData.map((point: TimeSeriesDataPoint): string => {
       const date = new Date(point.timestamp);
       return format(date, 'HH:mm');
     }),
     datasets: [
       {
         label: 'Requests per Minute',
-        data: hourlyData.map(point => point.value),
+        data: hourlyData.map((point: TimeSeriesDataPoint): number => point.value),
         borderColor: 'rgb(59, 130, 246)',
         backgroundColor: 'rgba(59, 130, 246, 0.1)',
         fill: true,
@@ -100,16 +102,16 @@ const Charts = ({ timeSeriesData }) => {
   };
 
   // Process daily data
-  const dailyData = timeSeriesData.requests_last_day || [];
+  const dailyData: TimeSeriesDataPoint[] = timeSeriesData.requests_last_day || [];
   const dailyChartData = {
-    labels: dailyData.map(point => {
+    labels: dailyData.map((point: TimeSeriesDataPoint): string => {
       const date = new Date(point.timestamp);
       return format(date, 'MMM dd HH:mm');
     }),
     datasets: [
       {
         label: 'Requests per Hour',
-        data: dailyData.map(point => point.value),
+        data: dailyData.map((point: TimeSeriesDataPoint): number => point.value),
         backgroundColor: 'rgba(99, 102, 241, 0.8)',
         borderColor: 'rgb(99, 102, 241)',
         borderWidth: 1,

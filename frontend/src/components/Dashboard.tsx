@@ -2,7 +2,7 @@ import React from 'react';
 import { RefreshCw, AlertCircle } from 'lucide-react';
 import { useMetrics, useHealth } from '../hooks/useMetrics.ts';
 import OverviewCards from './OverviewCards';
-import Charts from './Charts';
+import Charts from './Charts.tsx';
 import QueryTypes from './QueryTypes';
 import TopClients from './TopClients.tsx';
 import ConnectionStatus from './ConnectionStatus';
