@@ -1,6 +1,6 @@
 import React from 'react';
-import DNSMappings from './dns-mappings/DNSMappings.tsx';
-import Navigation from './Navigation';
+import DNSMappings from '../components/dns-mappings/DNSMappings.tsx';
+import Navigation from '../components/Navigation.tsx';
 
 const DNSMappingsPage: React.FC = () => {
   return (

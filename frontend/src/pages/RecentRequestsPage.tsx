@@ -1,9 +1,9 @@
 import React from 'react';
 import { AlertCircle } from 'lucide-react';
 import { useRecentRequests } from '../hooks/useMetrics.ts';
-import RecentRequests from './RecentRequests.tsx';
-import Navigation from './Navigation';
-import type { RecentRequestsFullHeightProps } from '../types';
+import RecentRequests from '../components/RecentRequests.tsx';
+import Navigation from '../components/Navigation.tsx';
+import type { RecentRequestsFullHeightProps } from '../types/index.ts';
 
 const RecentRequestsPage: React.FC = () => {
   const { recentRequests, loading, error } = useRecentRequests(5000);

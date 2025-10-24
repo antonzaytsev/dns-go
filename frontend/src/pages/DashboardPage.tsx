@@ -1,14 +1,14 @@
 import React from 'react';
 import { RefreshCw, AlertCircle } from 'lucide-react';
 import { useMetrics, useHealth } from '../hooks/useMetrics.ts';
-import OverviewCards from './OverviewCards';
-import Charts from './Charts.tsx';
-import QueryTypes from './QueryTypes';
-import TopClients from './TopClients.tsx';
-import ConnectionStatus from './ConnectionStatus.tsx';
-import Navigation from './Navigation';
+import OverviewCards from '../components/OverviewCards.tsx';
+import Charts from '../components/Charts.tsx';
+import QueryTypes from '../components/QueryTypes.tsx';
+import TopClients from '../components/TopClients.tsx';
+import ConnectionStatus from '../components/ConnectionStatus.tsx';
+import Navigation from '../components/Navigation.tsx';
 
-const Dashboard: React.FC = () => {
+const DashboardPage: React.FC = () => {
   const { metrics, loading, error, lastUpdated, refresh } = useMetrics(5000);
   const { isHealthy } = useHealth(30000);
 
@@ -86,4 +86,4 @@ const Dashboard: React.FC = () => {
   );
 };
 
-export default Dashboard;
+export default DashboardPage;

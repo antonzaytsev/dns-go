@@ -1,9 +1,9 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import Dashboard from './components/Dashboard.tsx';
-import DNSMappingsPage from './components/DNSMappingsPage.tsx';
-import RecentRequestsPage from './components/RecentRequestsPage.tsx';
-import NotFound from './components/NotFound';
+import DashboardPage from './pages/DashboardPage.tsx';
+import DNSMappingsPage from './pages/DNSMappingsPage.tsx';
+import RecentRequestsPage from './pages/RecentRequestsPage.tsx';
+import NotFoundPage from './pages/NotFoundPage.tsx';
 import './App.css';
 
 const App: React.FC = () => {
@@ -11,10 +11,10 @@ const App: React.FC = () => {
     <div className="App">
       <Router>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/" element={<DashboardPage />} />
           <Route path="/dns-mappings" element={<DNSMappingsPage />} />
           <Route path="/recent-requests" element={<RecentRequestsPage />} />
-          <Route path="*" element={<NotFound />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </Router>
     </div>

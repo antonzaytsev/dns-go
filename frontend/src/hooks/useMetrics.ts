@@ -8,7 +8,7 @@ import type {
   UseMetricsReturn,
   UseHealthReturn,
   UseRecentRequestsReturn 
-} from '../types';
+} from '../types/index.ts';
 
 export const useMetrics = (refreshInterval: number = 5000): UseMetricsReturn => {
   const [metrics, setMetrics] = useState<Metrics | null>(null);
