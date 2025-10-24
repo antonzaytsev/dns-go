@@ -25,7 +25,7 @@ const DashboardPage: React.FC = () => {
               <Navigation />
             </div>
             <div className="flex items-center space-x-4">
-              <ConnectionStatus 
+              <ConnectionStatus
                 isOnline={isHealthy}
                 lastUpdated={lastUpdated}
                 error={error}
@@ -68,7 +68,6 @@ const DashboardPage: React.FC = () => {
             <OverviewCards overview={metrics?.overview} />
           </section>
 
-          {/* Charts */}
           <section>
             <h2 className="text-lg font-medium text-gray-900 mb-4">Request Patterns</h2>
             <Charts timeSeriesData={metrics?.time_series} />
