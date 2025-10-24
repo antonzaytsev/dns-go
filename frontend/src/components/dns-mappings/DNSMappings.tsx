@@ -1,44 +1,45 @@
 import React, { useState, useEffect } from 'react';
 import { dnsApi } from '../../services/api.ts';
-import DNSMappingsHeader from './DNSMappingsHeader';
+import DNSMappingsHeader from './DNSMappingsHeader.tsx';
 import StatusMessages from '../StatusMessages.tsx';
-import AddMappingForm from './AddMappingForm';
-import DNSMappingsList from './DNSMappingsList';
-import DeleteConfirmationModal from './DeleteConfirmationModal';
+import AddMappingForm from './AddMappingForm.tsx';
+import DNSMappingsList from './DNSMappingsList.tsx';
+import DeleteConfirmationModal from './DeleteConfirmationModal.tsx';
+import type { DNSMappingsState, DNSMapping, ModalState, DNSMappingsResponse } from '../../types';
 
-const DNSMappings = () => {
-  const [mappings, setMappings] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
-  const [editingDomain, setEditingDomain] = useState(null);
-  const [newMapping, setNewMapping] = useState({ domain: '', ip: '' });
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [deleteConfirmation, setDeleteConfirmation] = useState({ show: false, domain: '' });
+const DNSMappings: React.FC = () => {
+  const [mappings, setMappings] = useState<DNSMappingsState>({});
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [editingDomain, setEditingDomain] = useState<string | null>(null);
+  const [newMapping, setNewMapping] = useState<DNSMapping>({ domain: '', ip: '' });
+  const [showAddForm, setShowAddForm] = useState<boolean>(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<ModalState>({ show: false, domain: '' });
 
 
   // Load DNS mappings from API
-  const loadMappings = async () => {
+  const loadMappings = async (): Promise<void> => {
     setLoading(true);
     setError(null);
 
     try {
-      const data = await dnsApi.getDNSMappings();
+      const data: DNSMappingsResponse = await dnsApi.getDNSMappings();
       // Remove trailing dots for display
-      const displayMappings = {};
-      Object.entries(data.mappings || {}).forEach(([domain, ip]) => {
+      const displayMappings: DNSMappingsState = {};
+      Object.entries(data.mappings || {}).forEach(([domain, ip]: [string, string]) => {
         const displayDomain = domain.endsWith('.') ? domain.slice(0, -1) : domain;
         displayMappings[displayDomain] = ip;
       });
       setMappings(displayMappings);
-    } catch (err) {
+    } catch (err: any) {
       setError(`Failed to load DNS mappings: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const addMapping = async () => {
+  const addMapping = async (): Promise<void> => {
     setLoading(true);
     setError(null);
 
@@ -48,18 +49,18 @@ const DNSMappings = () => {
       setNewMapping({ domain: '', ip: '' });
       setShowAddForm(false);
       await loadMappings();
-    } catch (err) {
+    } catch (err: any) {
       setError(`Failed to add DNS mapping: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const showDeleteConfirmation = (domain) => {
+  const showDeleteConfirmation = (domain: string): void => {
     setDeleteConfirmation({ show: true, domain });
   };
 
-  const handleDeleteConfirm = async () => {
+  const handleDeleteConfirm = async (): Promise<void> => {
     const domain = deleteConfirmation.domain;
     setDeleteConfirmation({ show: false, domain: '' });
 
@@ -70,7 +71,7 @@ const DNSMappings = () => {
       await dnsApi.deleteDNSMapping(domain);
       setSuccess('DNS mapping deleted successfully');
       await loadMappings();
-    } catch (err) {
+    } catch (err: any) {
       setError(`Failed to delete DNS mapping: ${err.message}`);
     } finally {
       setLoading(false);
@@ -78,17 +79,17 @@ const DNSMappings = () => {
   };
 
 
-  const handleDeleteCancel = () => {
+  const handleDeleteCancel = (): void => {
     setDeleteConfirmation({ show: false, domain: '' });
   };
 
-  const handleBackdropClick = (e) => {
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>): void => {
     if (e.target === e.currentTarget) {
       handleDeleteCancel();
     }
   };
 
-  const updateMapping = async (oldDomain, newDomain, newIp) => {
+  const updateMapping = async (oldDomain: string, newDomain: string, newIp: string): Promise<void> => {
     setLoading(true);
     setError(null);
 
@@ -100,7 +101,7 @@ const DNSMappings = () => {
       setSuccess('DNS mapping updated successfully');
       setEditingDomain(null);
       await loadMappings();
-    } catch (err) {
+    } catch (err: any) {
       setError(`Failed to update DNS mapping: ${err.message}`);
     } finally {
       setLoading(false);
@@ -115,7 +116,7 @@ const DNSMappings = () => {
   // Auto-clear messages after 5 seconds
   useEffect(() => {
     if (error || success) {
-      const timer = setTimeout(() => {
+      const timer: NodeJS.Timeout = setTimeout(() => {
         setError(null);
         setSuccess(null);
       }, 5000);
@@ -123,12 +124,19 @@ const DNSMappings = () => {
     }
   }, [error, success]);
 
-  const mappingEntries = Object.entries(mappings);
+  const mappingEntries: [string, string][] = Object.entries(mappings);
 
-  const handleFormCancel = () => {
+  const handleFormCancel = (): void => {
     setShowAddForm(false);
     setNewMapping({ domain: '', ip: '' });
     setError(null);
+  };
+
+  const handleMappingChange = (field: keyof DNSMapping, value: string): void => {
+    setNewMapping(prev => ({
+      ...prev,
+      [field]: value
+    }));
   };
 
   return (
@@ -146,7 +154,7 @@ const DNSMappings = () => {
         {showAddForm && (
           <AddMappingForm
             newMapping={newMapping}
-            onMappingChange={setNewMapping}
+            onMappingChange={handleMappingChange}
             onSubmit={addMapping}
             onCancel={handleFormCancel}
             loading={loading}

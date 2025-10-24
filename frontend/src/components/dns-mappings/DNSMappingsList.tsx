@@ -1,7 +1,8 @@
 import React from 'react';
-import DNSMappingRow from './DNSMappingRow';
+import DNSMappingRow from './DNSMappingRow.tsx';
+import type { DNSMappingsListProps } from '../../types';
 
-const DNSMappingsList = ({ 
+const DNSMappingsList: React.FC<DNSMappingsListProps> = ({ 
   mappings, 
   editingDomain, 
   onEdit, 
@@ -10,7 +11,7 @@ const DNSMappingsList = ({
   onDelete, 
   loading 
 }) => {
-  const mappingEntries = Object.entries(mappings);
+  const mappingEntries: [string, string][] = Object.entries(mappings);
 
   if (mappingEntries.length === 0) {
     return (

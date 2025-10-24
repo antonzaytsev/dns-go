@@ -1,14 +1,15 @@
 import React, { useEffect } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
+import type { DeleteConfirmationModalProps } from '../../types';
 
-const DeleteConfirmationModal = ({ 
+const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({ 
   isOpen, 
   domain, 
   onConfirm, 
   onCancel, 
   loading 
 }) => {
-  const handleBackdropClick = (e) => {
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>): void => {
     if (e.target === e.currentTarget) {
       onCancel();
     }
@@ -21,7 +22,7 @@ const DeleteConfirmationModal = ({
         modalElement.focus();
       }
 
-      const handleKeyDown = (e) => {
+      const handleKeyDown = (e: KeyboardEvent): void => {
         if (e.key === 'Escape') {
           onCancel();
         }

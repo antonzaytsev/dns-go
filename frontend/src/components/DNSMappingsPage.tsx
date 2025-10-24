@@ -1,8 +1,8 @@
 import React from 'react';
-import DNSMappings from './dns-mappings';
+import DNSMappings from './dns-mappings/DNSMappings.tsx';
 import Navigation from './Navigation';
 
-const DNSMappingsPage = () => {
+const DNSMappingsPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-100">
       {/* Header */}

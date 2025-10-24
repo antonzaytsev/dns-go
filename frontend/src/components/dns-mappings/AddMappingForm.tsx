@@ -1,14 +1,15 @@
 import React from 'react';
 import { Save, X, RefreshCw, Globe, Network } from 'lucide-react';
+import type { AddMappingFormProps, DNSMapping } from '../../types';
 
-const AddMappingForm = ({ 
+const AddMappingForm: React.FC<AddMappingFormProps> = ({ 
   newMapping, 
   onMappingChange, 
   onSubmit, 
   onCancel, 
   loading 
 }) => {
-  const handleSubmit = (e) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
     onSubmit();
   };
@@ -30,7 +31,7 @@ const AddMappingForm = ({
                 type="text"
                 id="new-domain"
                 value={newMapping.domain}
-                onChange={(e) => onMappingChange({ ...newMapping, domain: e.target.value })}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => onMappingChange('domain', e.target.value)}
                 placeholder="example.local"
                 aria-describedby="domain-help"
                 className="block w-full pl-10 py-3 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
@@ -53,7 +54,7 @@ const AddMappingForm = ({
                 type="text"
                 id="new-ip"
                 value={newMapping.ip}
-                onChange={(e) => onMappingChange({ ...newMapping, ip: e.target.value })}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => onMappingChange('ip', e.target.value)}
                 placeholder="192.168.1.100"
                 aria-describedby="ip-help"
                 className="block w-full pl-10 py-3 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm font-mono"

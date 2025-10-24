@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Edit3, Save, X, Trash2, Globe, Network } from 'lucide-react';
+import type { DNSMappingRowProps } from '../../types';
 
-const DNSMappingRow = ({ domain, ip, isEditing, onEdit, onSave, onCancel, onDelete, loading }) => {
-  const [editDomain, setEditDomain] = useState(domain);
-  const [editIp, setEditIp] = useState(ip);
+const DNSMappingRow: React.FC<DNSMappingRowProps> = ({ domain, ip, isEditing, onEdit, onSave, onCancel, onDelete, loading }) => {
+  const [editDomain, setEditDomain] = useState<string>(domain);
+  const [editIp, setEditIp] = useState<string>(ip);
 
   useEffect(() => {
     if (isEditing) {
@@ -12,17 +13,17 @@ const DNSMappingRow = ({ domain, ip, isEditing, onEdit, onSave, onCancel, onDele
     }
   }, [isEditing, domain, ip]);
 
-  const handleSave = () => {
+  const handleSave = (): void => {
     onSave(domain, editDomain, editIp);
   };
 
-  const handleCancel = () => {
+  const handleCancel = (): void => {
     setEditDomain(domain);
     setEditIp(ip);
     onCancel();
   };
 
-  const handleKeyDown = (e) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSave();
@@ -42,7 +43,7 @@ const DNSMappingRow = ({ domain, ip, isEditing, onEdit, onSave, onCancel, onDele
             <input
               type="text"
               value={editDomain}
-              onChange={(e) => setEditDomain(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditDomain(e.target.value)}
               onKeyDown={handleKeyDown}
               className="block w-full pl-10 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
               autoFocus
@@ -57,7 +58,7 @@ const DNSMappingRow = ({ domain, ip, isEditing, onEdit, onSave, onCancel, onDele
             <input
               type="text"
               value={editIp}
-              onChange={(e) => setEditIp(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditIp(e.target.value)}
               onKeyDown={handleKeyDown}
               className="block w-full pl-10 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm font-mono"
             />

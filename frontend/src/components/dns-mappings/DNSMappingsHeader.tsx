@@ -1,7 +1,8 @@
 import React from 'react';
 import { Plus, RefreshCw, Globe } from 'lucide-react';
+import type { DNSMappingsHeaderProps } from '../../types';
 
-const DNSMappingsHeader = ({ 
+const DNSMappingsHeader: React.FC<DNSMappingsHeaderProps> = ({ 
   onRefresh, 
   onAddMapping, 
   loading, 
