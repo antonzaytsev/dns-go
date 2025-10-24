@@ -3,7 +3,7 @@ import { format } from 'date-fns';
 import { CheckCircle, XCircle, Database, Clock, ExternalLink, Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { dnsApi } from '../services/api';
 
-const RecentRequests = ({ requests, loading: initialLoading = false }) => {
+const RecentRequests = ({ requests, loading: initialLoading = false, fullHeight = false }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -19,7 +19,7 @@ const RecentRequests = ({ requests, loading: initialLoading = false }) => {
   const performSearch = async (term = searchTerm, page = 0) => {
     setSearchLoading(true);
     setSearchError(null);
-    
+
     try {
       const result = await dnsApi.searchLogs(term, pageSize, page * pageSize);
       setSearchResults(result.results || []);
@@ -79,8 +79,6 @@ const RecentRequests = ({ requests, loading: initialLoading = false }) => {
   const isShowingSearchResults = searchPerformed;
   const isLoading = searchLoading || (!searchPerformed && initialLoading);
 
-
-
   const getStatusIcon = (status) => {
     switch (status) {
       case 'success':
@@ -128,68 +126,25 @@ const RecentRequests = ({ requests, loading: initialLoading = false }) => {
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6">
+    <div className={`bg-white rounded-lg shadow-md p-6 ${fullHeight ? 'h-full flex flex-col' : ''}`}>
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-gray-900">
-          {isShowingSearchResults ? 'DNS Logs Search' : 'Recent Requests'}
-        </h3>
-        <form onSubmit={handleSearch} className="flex items-center space-x-2">
-          <div className="relative">
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search domain, IP, client..."
-              className="w-64 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-            />
-            {searchTerm && (
-              <button
-                type="button"
-                onClick={clearSearch}
-                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-          <button
-            type="submit"
-            disabled={searchLoading}
-            className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
-          >
-            <Search className="h-4 w-4" />
-          </button>
-        </form>
-      </div>
-
-      {searchError && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
-          <p className="text-sm text-red-600">{searchError}</p>
+        <div className="flex items-center space-x-4">
+          <h3 className="text-lg font-semibold text-gray-900">
+            {isShowingSearchResults ? 'DNS Logs Search' : 'Recent Requests'}
+          </h3>
         </div>
-      )}
-
-      {searchPerformed && (
-        <div className="mb-4 flex items-center justify-between text-sm text-gray-600">
-          <div>
-            {searchTerm ? (
-              <>Showing results for "<span className="font-medium">{searchTerm}</span>"</>
-            ) : (
-              'Showing all DNS logs'
-            )}
-            {totalResults > 0 && (
-              <span className="ml-2">
-                ({totalResults.toLocaleString()} total result{totalResults !== 1 ? 's' : ''})
-              </span>
-            )}
-          </div>
+        {searchPerformed && (
           <div className="flex items-center space-x-4">
-            {searchSource === 'elasticsearch' && (
-              <div className="text-xs text-green-600 font-medium">
-                ⚡ Database Search
-              </div>
-            )}
-            {showPagination && (
-              <div className="flex items-center space-x-2">
+            <div className="text-sm text-gray-600">
+              <span className="ml-2">
+                {totalResults.toLocaleString()} total result{totalResults !== 1 ? 's' : ''}
+              </span>
+            </div>
+          </div>
+        )}
+        <div className="flex items-center space-x-4">
+          {showPagination && (
+            <div className="flex items-center space-x-2">
               <button
                 onClick={prevPage}
                 disabled={currentPage === 0}
@@ -207,9 +162,41 @@ const RecentRequests = ({ requests, loading: initialLoading = false }) => {
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
+          <form onSubmit={handleSearch} className="flex items-center space-x-2">
+            <div className="relative">
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search domain, IP, client..."
+                className="w-64 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <button
+              type="submit"
+              disabled={searchLoading}
+              className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+            >
+              <Search className="h-4 w-4" />
+            </button>
+          </form>
+        </div>
+      </div>
+
+      {searchError && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+          <p className="text-sm text-red-600">{searchError}</p>
         </div>
       )}
 
@@ -221,8 +208,8 @@ const RecentRequests = ({ requests, loading: initialLoading = false }) => {
           </div>
         </div>
       )}
-      <div className="overflow-x-auto">
-        <div className="max-h-96 overflow-y-auto">
+      <div className={`overflow-x-auto ${fullHeight ? 'flex-1' : ''}`}>
+        <div className={`${fullHeight ? 'h-full' : 'max-h-96'} overflow-y-auto`}>
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50 sticky top-0">
               <tr>
@@ -368,7 +355,7 @@ const RecentRequests = ({ requests, loading: initialLoading = false }) => {
           </table>
         </div>
       </div>
-      
+
       {!searchPerformed && requests && requests.length > 50 && (
         <div className="mt-4 text-center text-sm text-gray-500">
           Showing latest 50 of {requests.length} requests
