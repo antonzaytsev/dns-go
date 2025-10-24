@@ -430,6 +430,9 @@ func (s *Server) handleDNSMappings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Update in-memory config
+		s.config.CustomDNS = currentMappings
+
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"message": "DNS mapping added successfully",
@@ -464,6 +467,9 @@ func (s *Server) handleDNSMappings(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed to save DNS mappings: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		// Update in-memory config
+		s.config.CustomDNS = currentMappings
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
