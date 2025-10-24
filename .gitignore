@@ -39,3 +39,4 @@ ehthumbs.db
 Thumbs.db
 
 frontend/node_modules
+frontend/.pnpm-store

@@ -1,4 +1,7 @@
 # Development stage
 FROM node:18-alpine
 
+# Install latest pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
 WORKDIR /app
