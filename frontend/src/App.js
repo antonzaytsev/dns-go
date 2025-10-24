@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Dashboard from './components/Dashboard';
+import DNSMappingsPage from './components/DNSMappingsPage';
 import NotFound from './components/NotFound';
 import './App.css';
 
@@ -10,6 +11,7 @@ function App() {
       <Router>
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/dns-mappings" element={<DNSMappingsPage />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Router>

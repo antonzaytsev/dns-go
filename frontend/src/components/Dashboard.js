@@ -7,7 +7,7 @@ import QueryTypes from './QueryTypes';
 import TopClients from './TopClients';
 import RecentRequests from './RecentRequests';
 import ConnectionStatus from './ConnectionStatus';
-import DNSMappings from './dns-mappings';
+import Navigation from './Navigation';
 
 const Dashboard = () => {
   const { metrics, loading, error, lastUpdated, refresh } = useMetrics(5000);
@@ -20,10 +20,11 @@ const Dashboard = () => {
       <header className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
-            <div className="flex items-center">
+            <div className="flex items-center space-x-8">
               <h1 className="text-2xl font-bold text-gray-900">
-                DNS Server Dashboard
+                DNS Server
               </h1>
+              <Navigation />
             </div>
             <div className="flex items-center space-x-4">
               <ConnectionStatus 
@@ -79,11 +80,6 @@ const Dashboard = () => {
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <QueryTypes queryTypes={metrics?.query_types} />
             <TopClients clients={metrics?.top_clients} />
-          </section>
-
-          {/* DNS Mappings Management */}
-          <section>
-            <DNSMappings />
           </section>
 
           {/* Recent Requests */}
