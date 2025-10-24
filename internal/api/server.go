@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
+	"dns-go/internal/config"
 	"dns-go/internal/elasticsearch"
 	"dns-go/internal/metrics"
 	"dns-go/internal/monitor"
@@ -21,6 +24,7 @@ type Server struct {
 	metrics    *metrics.Metrics
 	logMonitor *monitor.LogMonitor
 	esClient   *elasticsearch.Client
+	config     *config.Config
 	port       string
 }
 
@@ -28,6 +32,7 @@ type Server struct {
 type Config struct {
 	Port        string
 	LogFilePath string
+	DNSConfig   *config.Config
 }
 
 // NewServer creates a new API server instance
@@ -78,6 +83,7 @@ func NewServer(cfg Config) (*Server, error) {
 		metrics:    metricsCollector,
 		logMonitor: logMonitor,
 		esClient:   esClient,
+		config:     cfg.DNSConfig,
 		port:       cfg.Port,
 	}
 
@@ -89,6 +95,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/search", s.handleSearch)
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/version", s.handleVersion)
+	mux.HandleFunc("/api/dns-mappings", s.handleDNSMappings)
 
 	// CORS middleware
 	handler := s.corsMiddleware(s.loggingMiddleware(mux))
@@ -111,10 +118,11 @@ func (s *Server) Start() error {
 	fmt.Printf("Port: %s\n", s.port)
 	fmt.Printf("Time: %s\n", time.Now().Format("2006-01-02 15:04:05"))
 	fmt.Printf("\n📡 Available Endpoints:\n")
-	fmt.Printf("  🔍 GET /api/metrics  - DNS server metrics and statistics\n")
-	fmt.Printf("  🔎 GET /api/search   - Search through DNS logs\n")
-	fmt.Printf("  ❤️  GET /api/health   - Health check endpoint\n")
-	fmt.Printf("  ℹ️  GET /api/version  - Version and build information\n")
+	fmt.Printf("  🔍 GET /api/metrics      - DNS server metrics and statistics\n")
+	fmt.Printf("  🔎 GET /api/search       - Search through DNS logs\n")
+	fmt.Printf("  ❤️  GET /api/health       - Health check endpoint\n")
+	fmt.Printf("  ℹ️  GET /api/version      - Version and build information\n")
+	fmt.Printf("  🌐 GET/PUT/POST/DELETE /api/dns-mappings - Manage custom DNS mappings\n")
 	fmt.Printf("\n🌐 Access URLs:\n")
 	fmt.Printf("  Local:    http://localhost:%s/api\n", s.port)
 	fmt.Printf("  Network:  http://0.0.0.0:%s/api\n", s.port)
@@ -282,6 +290,195 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		"build_date": versionInfo.BuildDate,
 		"go_version": versionInfo.GoVersion,
 	})
+}
+
+func (s *Server) handleDNSMappings(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// If no DNS config is available, return an error
+	if s.config == nil {
+		http.Error(w, "DNS configuration not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		// Return current DNS mappings
+		mappings := s.config.GetCustomDNS()
+		response := map[string]interface{}{
+			"mappings": mappings,
+			"count":    len(mappings),
+		}
+		json.NewEncoder(w).Encode(response)
+
+	case http.MethodPut:
+		// Replace all DNS mappings
+		var requestBody struct {
+			Mappings map[string]string `json:"mappings"`
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read request body", http.StatusBadRequest)
+			return
+		}
+		defer r.Body.Close()
+
+		if err := json.Unmarshal(body, &requestBody); err != nil {
+			http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+			return
+		}
+
+		// Validate and normalize mappings
+		normalizedMappings := make(map[string]string)
+		for domain, ip := range requestBody.Mappings {
+			domain = strings.TrimSpace(domain)
+			ip = strings.TrimSpace(ip)
+
+			if domain == "" || ip == "" {
+				http.Error(w, "Domain and IP cannot be empty", http.StatusBadRequest)
+				return
+			}
+
+			// Ensure domain ends with a dot for DNS processing
+			if !strings.HasSuffix(domain, ".") {
+				domain += "."
+			}
+
+			normalizedMappings[domain] = ip
+		}
+
+		// Save to config file
+		if err := s.saveDNSMappings(normalizedMappings); err != nil {
+			http.Error(w, "Failed to save DNS mappings: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Update in-memory config
+		s.config.CustomDNS = normalizedMappings
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "DNS mappings updated successfully",
+			"count":   len(normalizedMappings),
+		})
+
+	case http.MethodPost:
+		// Add or update a single DNS mapping
+		var requestBody struct {
+			Domain string `json:"domain"`
+			IP     string `json:"ip"`
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read request body", http.StatusBadRequest)
+			return
+		}
+		defer r.Body.Close()
+
+		if err := json.Unmarshal(body, &requestBody); err != nil {
+			http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+			return
+		}
+
+		domain := strings.TrimSpace(requestBody.Domain)
+		ip := strings.TrimSpace(requestBody.IP)
+
+		if domain == "" || ip == "" {
+			http.Error(w, "Domain and IP are required", http.StatusBadRequest)
+			return
+		}
+
+		// Ensure domain ends with a dot for DNS processing
+		if !strings.HasSuffix(domain, ".") {
+			domain += "."
+		}
+
+		// Get current mappings and add/update the new one
+		currentMappings := s.config.GetCustomDNS()
+		currentMappings[domain] = ip
+
+		// Save to config file
+		if err := s.saveDNSMappings(currentMappings); err != nil {
+			http.Error(w, "Failed to save DNS mappings: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "DNS mapping added successfully",
+			"domain":  domain,
+			"ip":      ip,
+		})
+
+	case http.MethodDelete:
+		// Delete a specific DNS mapping
+		domain := r.URL.Query().Get("domain")
+		if domain == "" {
+			http.Error(w, "Domain parameter is required", http.StatusBadRequest)
+			return
+		}
+
+		// Ensure domain ends with a dot for DNS processing
+		if !strings.HasSuffix(domain, ".") {
+			domain += "."
+		}
+
+		// Get current mappings and remove the specified domain
+		currentMappings := s.config.GetCustomDNS()
+		if _, exists := currentMappings[domain]; !exists {
+			http.Error(w, "Domain mapping not found", http.StatusNotFound)
+			return
+		}
+
+		delete(currentMappings, domain)
+
+		// Save to config file
+		if err := s.saveDNSMappings(currentMappings); err != nil {
+			http.Error(w, "Failed to save DNS mappings: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "DNS mapping deleted successfully",
+			"domain":  domain,
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// saveDNSMappings saves the DNS mappings to the custom-dns.json file
+func (s *Server) saveDNSMappings(mappings map[string]string) error {
+	// Create the structure that matches the JSON file format
+	configData := struct {
+		Mappings map[string]string `json:"mappings"`
+	}{
+		Mappings: make(map[string]string),
+	}
+
+	// Remove trailing dots from domains for file storage (user-friendly format)
+	for domain, ip := range mappings {
+		displayDomain := strings.TrimSuffix(domain, ".")
+		configData.Mappings[displayDomain] = ip
+	}
+
+	// Convert to JSON
+	jsonData, err := json.MarshalIndent(configData, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+
+	// Write to the custom-dns.json file
+	configFile := "custom-dns.json"
+	if err := os.WriteFile(configFile, jsonData, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
 }
 
 // Middleware

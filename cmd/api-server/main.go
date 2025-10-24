@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"dns-go/internal/api"
+	"dns-go/internal/config"
 	"dns-go/pkg/version"
 )
 
@@ -64,14 +65,22 @@ func run() error {
 		}
 	}
 
+	// Load DNS configuration to enable DNS mappings management
+	dnsConfig, err := config.LoadFromFlags()
+	if err != nil {
+		fmt.Printf("Warning: Could not load DNS configuration: %v\n", err)
+		fmt.Println("DNS mappings management will be disabled")
+	}
+
 	// Create API server configuration
-	config := api.Config{
+	apiConfig := api.Config{
 		Port:        apiPort,
 		LogFilePath: logFilePath,
+		DNSConfig:   dnsConfig,
 	}
 
 	// Create API server
-	server, err := api.NewServer(config)
+	server, err := api.NewServer(apiConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create API server: %w", err)
 	}

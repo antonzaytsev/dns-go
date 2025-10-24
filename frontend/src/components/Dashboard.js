@@ -7,6 +7,7 @@ import QueryTypes from './QueryTypes';
 import TopClients from './TopClients';
 import RecentRequests from './RecentRequests';
 import ConnectionStatus from './ConnectionStatus';
+import DNSMappings from './DNSMappings';
 
 const Dashboard = () => {
   const { metrics, loading, error, lastUpdated, refresh } = useMetrics(5000);
@@ -78,6 +79,11 @@ const Dashboard = () => {
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <QueryTypes queryTypes={metrics?.query_types} />
             <TopClients clients={metrics?.top_clients} />
+          </section>
+
+          {/* DNS Mappings Management */}
+          <section>
+            <DNSMappings />
           </section>
 
           {/* Recent Requests */}
