@@ -3,11 +3,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -65,11 +68,11 @@ func run() error {
 		}
 	}
 
-	// Load DNS configuration to enable DNS mappings management
-	dnsConfig, err := config.LoadFromFlags()
-	if err != nil {
-		fmt.Printf("Warning: Could not load DNS configuration: %v\n", err)
-		fmt.Println("DNS mappings management will be disabled")
+	// Load DNS configuration to enable DNS mappings management (without flag parsing)
+	dnsConfig := config.DefaultConfig()
+	// Load custom DNS mappings from file without flag parsing
+	if err := loadCustomDNSOnly(dnsConfig); err != nil {
+		fmt.Printf("Warning: Could not load custom DNS mappings: %v\n", err)
 	}
 
 	// Create API server configuration
@@ -126,5 +129,70 @@ func run() error {
 	}
 
 	fmt.Println("API server shutdown complete")
+	return nil
+}
+
+// loadCustomDNSOnly loads custom DNS mappings from file without flag parsing
+func loadCustomDNSOnly(cfg *config.Config) error {
+	const customDNSConfigFile = "custom-dns.json"
+
+	// Get the path to the custom DNS configuration file
+	configPath := customDNSConfigFile
+
+	// Check if running from a different directory, try to find the config file relative to executable
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		// Try to find config file in the same directory as the executable
+		execPath, execErr := os.Executable()
+		if execErr == nil {
+			configPath = filepath.Join(filepath.Dir(execPath), customDNSConfigFile)
+		}
+	}
+
+	// Check if the config file exists
+	_, err := os.Stat(configPath)
+	if os.IsNotExist(err) {
+		// File doesn't exist, which is fine - custom DNS feature is disabled
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to stat custom DNS config file %s: %w", configPath, err)
+	}
+
+	// Read the configuration file
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read custom DNS config file %s: %w", configPath, err)
+	}
+
+	// Parse the JSON configuration
+	var customDNSConfig struct {
+		Mappings map[string]string `json:"mappings"`
+	}
+	if err := json.Unmarshal(data, &customDNSConfig); err != nil {
+		return fmt.Errorf("failed to parse custom DNS config file %s: %w", configPath, err)
+	}
+
+	// Initialize CustomDNS map if it doesn't exist
+	if cfg.CustomDNS == nil {
+		cfg.CustomDNS = make(map[string]string)
+	}
+
+	// Process and normalize the mappings from the config file
+	for domain, ip := range customDNSConfig.Mappings {
+		domain = strings.TrimSpace(domain)
+		ip = strings.TrimSpace(ip)
+
+		if domain == "" || ip == "" {
+			return fmt.Errorf("invalid custom DNS mapping in config file: empty domain or IP")
+		}
+
+		// Ensure domain ends with a dot for DNS processing
+		if !strings.HasSuffix(domain, ".") {
+			domain += "."
+		}
+
+		cfg.CustomDNS[domain] = ip
+	}
+
 	return nil
 }
