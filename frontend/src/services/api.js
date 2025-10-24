@@ -95,6 +95,38 @@ export const dnsApi = {
       throw error;
     }
   },
+
+  // DNS mappings management
+  getDNSMappings: async () => {
+    try {
+      const response = await api.get('/api/dns-mappings');
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch DNS mappings:', error);
+      throw error;
+    }
+  },
+
+  addDNSMapping: async (domain, ip) => {
+    try {
+      const response = await api.post('/api/dns-mappings', { domain, ip });
+      return response.data;
+    } catch (error) {
+      console.error('Failed to add DNS mapping:', error);
+      throw error;
+    }
+  },
+
+
+  deleteDNSMapping: async (domain) => {
+    try {
+      const response = await api.delete(`/api/dns-mappings?domain=${encodeURIComponent(domain)}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to delete DNS mapping:', error);
+      throw error;
+    }
+  },
 };
 
 export default api;

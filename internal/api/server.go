@@ -336,60 +336,8 @@ func (s *Server) handleDNSMappings(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(response)
 
-	case http.MethodPut:
-		// Replace all DNS mappings
-		var requestBody struct {
-			Mappings map[string]string `json:"mappings"`
-		}
-
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "Failed to read request body", http.StatusBadRequest)
-			return
-		}
-		defer r.Body.Close()
-
-		if err := json.Unmarshal(body, &requestBody); err != nil {
-			http.Error(w, "Invalid JSON format", http.StatusBadRequest)
-			return
-		}
-
-		// Validate and normalize mappings
-		normalizedMappings := make(map[string]string)
-		for domain, ip := range requestBody.Mappings {
-			domain = strings.TrimSpace(domain)
-			ip = strings.TrimSpace(ip)
-
-			if domain == "" || ip == "" {
-				http.Error(w, "Domain and IP cannot be empty", http.StatusBadRequest)
-				return
-			}
-
-			// Ensure domain ends with a dot for DNS processing
-			if !strings.HasSuffix(domain, ".") {
-				domain += "."
-			}
-
-			normalizedMappings[domain] = ip
-		}
-
-		// Save to config file
-		if err := s.saveDNSMappings(normalizedMappings); err != nil {
-			http.Error(w, "Failed to save DNS mappings: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// Update in-memory config
-		s.config.CustomDNS = normalizedMappings
-
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"message": "DNS mappings updated successfully",
-			"count":   len(normalizedMappings),
-		})
-
 	case http.MethodPost:
-		// Add or update a single DNS mapping
+		// Add a single DNS mapping (create only, not update)
 		var requestBody struct {
 			Domain string `json:"domain"`
 			IP     string `json:"ip"`
@@ -420,8 +368,14 @@ func (s *Server) handleDNSMappings(w http.ResponseWriter, r *http.Request) {
 			domain += "."
 		}
 
-		// Get current mappings and add/update the new one
+		// Get current mappings and check if domain already exists
 		currentMappings := s.config.GetCustomDNS()
+		if _, exists := currentMappings[domain]; exists {
+			http.Error(w, "Domain mapping already exists. Delete first to update.", http.StatusConflict)
+			return
+		}
+
+		// Add the new mapping
 		currentMappings[domain] = ip
 
 		// Save to config file

@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Plus, 
-  Trash2, 
-  Edit3, 
-  Save, 
-  X, 
+import {
+  Plus,
+  Trash2,
+  Edit3,
+  Save,
+  X,
   AlertCircle,
   CheckCircle,
   RefreshCw,
-  Globe
+  Globe,
+  Network
 } from 'lucide-react';
+import { dnsApi } from '../services/api';
 
 const DNSMappings = () => {
   const [mappings, setMappings] = useState({});
@@ -19,19 +21,16 @@ const DNSMappings = () => {
   const [editingDomain, setEditingDomain] = useState(null);
   const [newMapping, setNewMapping] = useState({ domain: '', ip: '' });
   const [showAddForm, setShowAddForm] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState({ show: false, domain: '' });
+
 
   // Load DNS mappings from API
   const loadMappings = async () => {
     setLoading(true);
     setError(null);
-    
+
     try {
-      const response = await fetch('/api/dns-mappings');
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
+      const data = await dnsApi.getDNSMappings();
       // Remove trailing dots for display
       const displayMappings = {};
       Object.entries(data.mappings || {}).forEach(([domain, ip]) => {
@@ -46,33 +45,12 @@ const DNSMappings = () => {
     }
   };
 
-  // Add a new DNS mapping
   const addMapping = async () => {
-    if (!newMapping.domain.trim() || !newMapping.ip.trim()) {
-      setError('Both domain and IP address are required');
-      return;
-    }
-
     setLoading(true);
     setError(null);
-    
+
     try {
-      const response = await fetch('/api/dns-mappings', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          domain: newMapping.domain.trim(),
-          ip: newMapping.ip.trim(),
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(errorData || `HTTP ${response.status}`);
-      }
-
+      await dnsApi.addDNSMapping(newMapping.domain.trim(), newMapping.ip.trim());
       setSuccess('DNS mapping added successfully');
       setNewMapping({ domain: '', ip: '' });
       setShowAddForm(false);
@@ -84,25 +62,19 @@ const DNSMappings = () => {
     }
   };
 
-  // Delete a DNS mapping
-  const deleteMapping = async (domain) => {
-    if (!window.confirm(`Are you sure you want to delete the mapping for "${domain}"?`)) {
-      return;
-    }
+  const showDeleteConfirmation = (domain) => {
+    setDeleteConfirmation({ show: true, domain });
+  };
+
+  const handleDeleteConfirm = async () => {
+    const domain = deleteConfirmation.domain;
+    setDeleteConfirmation({ show: false, domain: '' });
 
     setLoading(true);
     setError(null);
 
     try {
-      const response = await fetch(`/api/dns-mappings?domain=${encodeURIComponent(domain)}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(errorData || `HTTP ${response.status}`);
-      }
-
+      await dnsApi.deleteDNSMapping(domain);
       setSuccess('DNS mapping deleted successfully');
       await loadMappings();
     } catch (err) {
@@ -112,41 +84,25 @@ const DNSMappings = () => {
     }
   };
 
-  // Update a DNS mapping
-  const updateMapping = async (oldDomain, newDomain, newIp) => {
-    if (!newDomain.trim() || !newIp.trim()) {
-      setError('Both domain and IP address are required');
-      return;
-    }
 
+  const handleDeleteCancel = () => {
+    setDeleteConfirmation({ show: false, domain: '' });
+  };
+
+  const handleBackdropClick = (e) => {
+    if (e.target === e.currentTarget) {
+      handleDeleteCancel();
+    }
+  };
+
+  const updateMapping = async (oldDomain, newDomain, newIp) => {
     setLoading(true);
     setError(null);
 
     try {
-      // If domain changed, delete old and add new; otherwise just update IP
-      if (oldDomain !== newDomain.trim()) {
-        // Delete old mapping
-        await fetch(`/api/dns-mappings?domain=${encodeURIComponent(oldDomain)}`, {
-          method: 'DELETE',
-        });
-      }
+      await dnsApi.deleteDNSMapping(oldDomain);
 
-      // Add/update new mapping
-      const response = await fetch('/api/dns-mappings', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          domain: newDomain.trim(),
-          ip: newIp.trim(),
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(errorData || `HTTP ${response.status}`);
-      }
+      await dnsApi.addDNSMapping(newDomain.trim(), newIp.trim());
 
       setSuccess('DNS mapping updated successfully');
       setEditingDomain(null);
@@ -158,7 +114,7 @@ const DNSMappings = () => {
     }
   };
 
-  // Load mappings on component mount
+
   useEffect(() => {
     loadMappings();
   }, []);
@@ -173,6 +129,24 @@ const DNSMappings = () => {
       return () => clearTimeout(timer);
     }
   }, [error, success]);
+
+  useEffect(() => {
+    if (deleteConfirmation.show) {
+      const modalElement = document.querySelector('[data-modal="delete-confirmation"]');
+      if (modalElement) {
+        modalElement.focus();
+      }
+
+      const handleKeyDown = (e) => {
+        if (e.key === 'Escape') {
+          handleDeleteCancel();
+        }
+      };
+
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [deleteConfirmation.show]);
 
   const mappingEntries = Object.entries(mappings);
 
@@ -197,7 +171,7 @@ const DNSMappings = () => {
             </button>
             <button
               onClick={() => setShowAddForm(true)}
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
             >
               <Plus className="h-4 w-4 mr-2" />
               Add Mapping
@@ -231,56 +205,83 @@ const DNSMappings = () => {
         {/* Add New Mapping Form */}
         {showAddForm && (
           <div className="mb-6 bg-gray-50 border border-gray-200 rounded-md p-4">
-            <h4 className="text-sm font-medium text-gray-900 mb-3">Add New DNS Mapping</h4>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label htmlFor="new-domain" className="block text-sm font-medium text-gray-700">
-                  Domain
-                </label>
-                <input
-                  type="text"
-                  id="new-domain"
-                  value={newMapping.domain}
-                  onChange={(e) => setNewMapping({ ...newMapping, domain: e.target.value })}
-                  placeholder="example.local"
-                  className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                />
+            <h4 className="text-sm font-medium text-gray-900 mb-4">Add New DNS Mapping</h4>
+            <form onSubmit={(e) => { e.preventDefault(); addMapping(); }}>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="new-domain" className="block text-sm font-medium text-gray-700 mb-1">
+                    Domain Name
+                  </label>
+                  <div className="relative rounded-md shadow-sm">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Globe className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <input
+                      type="text"
+                      id="new-domain"
+                      value={newMapping.domain}
+                      onChange={(e) => setNewMapping({ ...newMapping, domain: e.target.value })}
+                      placeholder="example.local"
+                      aria-describedby="domain-help"
+                      className="block w-full pl-10 py-3 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    />
+                  </div>
+                  <p id="domain-help" className="mt-1 text-xs text-gray-500">
+                    Enter a domain name (e.g., example.local, server.internal)
+                  </p>
+                </div>
+
+                <div>
+                  <label htmlFor="new-ip" className="block text-sm font-medium text-gray-700 mb-1">
+                    IP Address
+                  </label>
+                  <div className="relative rounded-md shadow-sm">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Network className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <input
+                      type="text"
+                      id="new-ip"
+                      value={newMapping.ip}
+                      onChange={(e) => setNewMapping({ ...newMapping, ip: e.target.value })}
+                      placeholder="192.168.1.100"
+                      aria-describedby="ip-help"
+                      className="block w-full pl-10 py-3 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm font-mono"
+                    />
+                  </div>
+                  <p id="ip-help" className="mt-1 text-xs text-gray-500">
+                    Enter an IPv4 address (e.g., 192.168.1.100)
+                  </p>
+                </div>
               </div>
-              <div>
-                <label htmlFor="new-ip" className="block text-sm font-medium text-gray-700">
-                  IP Address
-                </label>
-                <input
-                  type="text"
-                  id="new-ip"
-                  value={newMapping.ip}
-                  onChange={(e) => setNewMapping({ ...newMapping, ip: e.target.value })}
-                  placeholder="192.168.1.100"
-                  className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                />
+
+              <div className="mt-4 flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddForm(false);
+                    setNewMapping({ domain: '', ip: '' });
+                    setError(null);
+                  }}
+                  className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                >
+                  <X className="h-4 w-4 mr-1" />
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading || !newMapping.domain.trim() || !newMapping.ip.trim()}
+                  className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? (
+                    <RefreshCw className="h-4 w-4 mr-1 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4 mr-1" />
+                  )}
+                  Add Mapping
+                </button>
               </div>
-            </div>
-            <div className="mt-3 flex justify-end space-x-2">
-              <button
-                onClick={() => {
-                  setShowAddForm(false);
-                  setNewMapping({ domain: '', ip: '' });
-                  setError(null);
-                }}
-                className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-              >
-                <X className="h-4 w-4 mr-1" />
-                Cancel
-              </button>
-              <button
-                onClick={addMapping}
-                disabled={loading}
-                className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
-              >
-                <Save className="h-4 w-4 mr-1" />
-                Add
-              </button>
-            </div>
+            </form>
           </div>
         )}
 
@@ -328,7 +329,7 @@ const DNSMappings = () => {
                     onEdit={() => setEditingDomain(domain)}
                     onSave={updateMapping}
                     onCancel={() => setEditingDomain(null)}
-                    onDelete={deleteMapping}
+                    onDelete={showDeleteConfirmation}
                     loading={loading}
                   />
                 ))
@@ -343,6 +344,67 @@ const DNSMappings = () => {
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmation.show && (
+        <div
+          className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
+          onClick={handleBackdropClick}
+          tabIndex={-1}
+          data-modal="delete-confirmation"
+        >
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white"
+               onClick={(e) => e.stopPropagation()}>
+            <div className="mt-3">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
+                <AlertCircle className="h-6 w-6 text-red-600" />
+              </div>
+              <div className="mt-3 text-center">
+                <h3 className="text-lg leading-6 font-medium text-gray-900">
+                  Delete DNS Mapping
+                </h3>
+                <div className="mt-2 px-7 py-3">
+                  <p className="text-sm text-gray-500">
+                    Are you sure you want to delete the mapping for{' '}
+                    <span className="font-semibold text-gray-900">
+                      {deleteConfirmation.domain}
+                    </span>
+                    ? This action cannot be undone.
+                  </p>
+                </div>
+                <div className="flex items-center justify-center space-x-4 px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={handleDeleteCancel}
+                    disabled={loading}
+                    className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeleteConfirm}
+                    disabled={loading}
+                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
+                  >
+                    {loading ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                        Deleting...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -369,38 +431,62 @@ const MappingRow = ({ domain, ip, isEditing, onEdit, onSave, onCancel, onDelete,
     onCancel();
   };
 
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSave();
+    } else if (e.key === 'Escape') {
+      handleCancel();
+    }
+  };
+
   if (isEditing) {
     return (
       <tr className="bg-blue-50">
         <td className="px-6 py-4 whitespace-nowrap">
-          <input
-            type="text"
-            value={editDomain}
-            onChange={(e) => setEditDomain(e.target.value)}
-            className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-          />
+          <div className="relative">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Globe className="h-4 w-4 text-gray-400" />
+            </div>
+            <input
+              type="text"
+              value={editDomain}
+              onChange={(e) => setEditDomain(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="block w-full pl-10 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+              autoFocus
+            />
+          </div>
         </td>
         <td className="px-6 py-4 whitespace-nowrap">
-          <input
-            type="text"
-            value={editIp}
-            onChange={(e) => setEditIp(e.target.value)}
-            className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-          />
+          <div className="relative">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Network className="h-4 w-4 text-gray-400" />
+            </div>
+            <input
+              type="text"
+              value={editIp}
+              onChange={(e) => setEditIp(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="block w-full pl-10 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm font-mono"
+            />
+          </div>
         </td>
         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
           <div className="flex items-center justify-end space-x-2">
             <button
               onClick={handleSave}
-              disabled={loading}
-              className="text-green-600 hover:text-green-900 disabled:opacity-50"
+              disabled={loading || !editDomain.trim() || !editIp.trim()}
+              className="text-green-600 hover:text-green-900 disabled:opacity-50 disabled:cursor-not-allowed p-1 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+              title="Save changes (Enter)"
             >
               <Save className="h-4 w-4" />
             </button>
             <button
               onClick={handleCancel}
               disabled={loading}
-              className="text-gray-600 hover:text-gray-900 disabled:opacity-50"
+              className="text-gray-600 hover:text-gray-900 disabled:opacity-50 p-1 rounded focus:outline-none focus:ring-2 focus:ring-gray-500"
+              title="Cancel editing (Escape)"
             >
               <X className="h-4 w-4" />
             </button>
