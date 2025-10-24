@@ -1,10 +1,10 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 
-const Navigation = () => {
+const Navigation: React.FC = () => {
   const location = useLocation();
 
-  const isActive = (path) => {
+  const isActive = (path: string): boolean => {
     return location.pathname === path;
   };
 

@@ -1,8 +1,31 @@
 import React from 'react';
-import { Activity, Clock, Database, Users, Zap, TrendingUp } from 'lucide-react';
+import { Activity, Clock, Database, Users, Zap, TrendingUp, LucideIcon } from 'lucide-react';
+import { Metrics } from '../types';
 
-const OverviewCard = ({ title, value, subtitle, icon: Icon, color = 'blue' }) => {
-  const colorClasses = {
+type ColorType = 'blue' | 'green' | 'purple' | 'orange' | 'indigo' | 'pink';
+
+interface OverviewCardProps {
+  title: string;
+  value: string;
+  subtitle?: string;
+  icon: LucideIcon;
+  color?: ColorType;
+}
+
+interface OverviewCardsProps {
+  overview: Metrics | null;
+}
+
+interface CardData {
+  title: string;
+  value: string;
+  subtitle: string;
+  icon: LucideIcon;
+  color: ColorType;
+}
+
+const OverviewCard: React.FC<OverviewCardProps> = ({ title, value, subtitle, icon: Icon, color = 'blue' }) => {
+  const colorClasses: Record<ColorType, string> = {
     blue: 'border-blue-200 bg-blue-50 text-blue-600',
     green: 'border-green-200 bg-green-50 text-green-600',
     purple: 'border-purple-200 bg-purple-50 text-purple-600',
@@ -33,7 +56,7 @@ const OverviewCard = ({ title, value, subtitle, icon: Icon, color = 'blue' }) =>
   );
 };
 
-const OverviewCards = ({ overview }) => {
+const OverviewCards: React.FC<OverviewCardsProps> = ({ overview }) => {
   if (!overview) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -53,48 +76,74 @@ const OverviewCards = ({ overview }) => {
     );
   }
 
-  const formatNumber = (num) => {
+  const formatNumber = (num: number | undefined): string => {
+    if (!num) return '0';
     if (num >= 1000000) {
       return (num / 1000000).toFixed(1) + 'M';
     } else if (num >= 1000) {
       return (num / 1000).toFixed(1) + 'K';
     }
-    return num?.toString() || '0';
+    return num.toString();
   };
 
-  const cards = [
+  // Calculate success rate from metrics
+  const calculateSuccessRate = (): number => {
+    const total = overview.total_requests || 0;
+    const failed = overview.failed_requests || 0;
+    if (total === 0) return 0;
+    return ((total - failed) / total) * 100;
+  };
+
+  // Calculate cache hit rate
+  const calculateCacheHitRate = (): number => {
+    const hits = overview.cache_hits || 0;
+    const misses = overview.cache_misses || 0;
+    const total = hits + misses;
+    if (total === 0) return 0;
+    return (hits / total) * 100;
+  };
+
+  // Calculate requests per second (rough estimate based on uptime)
+  const calculateRequestsPerSecond = (): number => {
+    const total = overview.total_requests || 0;
+    // For now, return a placeholder calculation
+    // This would need actual time-based data for accuracy
+    return total > 0 ? Math.max(0.1, total / 3600) : 0; // Rough estimate
+  };
+
+  const cards: CardData[] = [
     {
       title: 'Total Requests',
       value: formatNumber(overview.total_requests),
-      subtitle: `${overview.requests_per_second?.toFixed(2) || '0'} req/sec`,
+      subtitle: `${calculateRequestsPerSecond().toFixed(2)} req/sec`,
       icon: Activity,
       color: 'blue',
     },
     {
       title: 'Cache Hit Rate',
-      value: `${overview.cache_hit_rate?.toFixed(1) || '0'}%`,
+      value: `${calculateCacheHitRate().toFixed(1)}%`,
       subtitle: 'Cache Performance',
       icon: Database,
       color: 'green',
     },
     {
       title: 'Success Rate',
-      value: `${overview.success_rate?.toFixed(1) || '0'}%`,
+      value: `${calculateSuccessRate().toFixed(1)}%`,
       subtitle: 'Query Success',
       icon: TrendingUp,
       color: 'purple',
     },
     {
       title: 'Avg Response Time',
-      value: `${overview.average_response_time_ms?.toFixed(1) || '0'} ms`,
+      value: `${(overview.avg_response_time || 0).toFixed(1)} ms`,
       subtitle: 'Performance',
       icon: Zap,
       color: 'orange',
     },
     {
       title: 'Active Clients',
-      value: overview.active_clients || '0',
-      subtitle: 'Last Hour',
+      value: (overview.clients?.length || 0).toString(),
+      subtitle: 'Connected',
       icon: Users,
       color: 'indigo',
     },

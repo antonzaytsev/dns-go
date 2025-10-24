@@ -1,6 +1,10 @@
 import React from 'react';
 
-const QueryTypes = ({ queryTypes }) => {
+interface QueryTypesProps {
+  queryTypes: Record<string, number> | null | undefined;
+}
+
+const QueryTypes: React.FC<QueryTypesProps> = ({ queryTypes }) => {
   if (!queryTypes || Object.keys(queryTypes).length === 0) {
     return (
       <div className="bg-white rounded-lg shadow-md p-6">
@@ -12,7 +16,7 @@ const QueryTypes = ({ queryTypes }) => {
     );
   }
 
-  const formatNumber = (num) => {
+  const formatNumber = (num: number): string => {
     if (num >= 1000000) {
       return (num / 1000000).toFixed(1) + 'M';
     } else if (num >= 1000) {
@@ -25,7 +29,7 @@ const QueryTypes = ({ queryTypes }) => {
     .sort(([, a], [, b]) => b - a)
     .slice(0, 8); // Show top 8 query types
 
-  const colors = [
+  const colors: string[] = [
     'bg-blue-100 border-blue-300 text-blue-800',
     'bg-green-100 border-green-300 text-green-800',
     'bg-purple-100 border-purple-300 text-purple-800',

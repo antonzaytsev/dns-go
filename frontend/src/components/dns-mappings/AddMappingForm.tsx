@@ -1,6 +1,6 @@
 import React from 'react';
 import { Save, X, RefreshCw, Globe, Network } from 'lucide-react';
-import type { AddMappingFormProps, DNSMapping } from '../../types';
+import type { AddMappingFormProps } from '../../types';
 
 const AddMappingForm: React.FC<AddMappingFormProps> = ({ 
   newMapping, 
