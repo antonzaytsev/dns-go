@@ -1,17 +1,6 @@
 import React from 'react';
 import { format } from 'date-fns';
-
-interface Client {
-  ip: string;
-  requests: number;
-  cache_hit_rate: number;
-  success_rate: number;
-  last_seen: string;
-}
-
-interface TopClientsProps {
-  clients: Client[];
-}
+import type { TopClientsProps } from '../types';
 
 const TopClients: React.FC<TopClientsProps> = ({ clients }) => {
   if (!clients || clients.length === 0) {

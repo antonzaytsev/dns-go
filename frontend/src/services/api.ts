@@ -1,9 +1,17 @@
-import axios from 'axios';
+import axios, { AxiosInstance, AxiosResponse, AxiosError, InternalAxiosRequestConfig } from 'axios';
+import type {
+  Metrics,
+  HealthStatus,
+  VersionInfo,
+  SearchResponse,
+  DNSMappingsResponse,
+  APIResponse,
+} from '../types';
 
-const port = process.env.REACT_APP_API_PORT || '8080'
+const port: string = process.env.REACT_APP_API_PORT || '8080';
 
 // Create axios instance with base configuration
-const api = axios.create({
+const api: AxiosInstance = axios.create({
   baseURL: `http://${window.location.hostname}:${port}`,
   timeout: 10000,
   headers: {
@@ -13,10 +21,10 @@ const api = axios.create({
 
 // Request interceptor for logging
 api.interceptors.request.use(
-  (config) => {
+  (config: InternalAxiosRequestConfig) => {
     return config;
   },
-  (error) => {
+  (error: AxiosError) => {
     console.error('API Request Error:', error);
     return Promise.reject(error);
   }
@@ -24,10 +32,10 @@ api.interceptors.request.use(
 
 // Response interceptor for error handling
 api.interceptors.response.use(
-  (response) => {
+  (response: AxiosResponse) => {
     return response;
   },
-  (error) => {
+  (error: AxiosError) => {
     console.error('API Response Error:', error.response?.status, error.message);
     return Promise.reject(error);
   }
@@ -36,9 +44,9 @@ api.interceptors.response.use(
 // API service functions
 export const dnsApi = {
   // Get DNS server metrics
-  getMetrics: async () => {
+  getMetrics: async (): Promise<Metrics> => {
     try {
-      const response = await api.get('/api/metrics');
+      const response: AxiosResponse<Metrics> = await api.get('/api/metrics');
       return response.data;
     } catch (error) {
       console.error('Failed to fetch metrics:', error);
@@ -47,9 +55,9 @@ export const dnsApi = {
   },
 
   // Get health status
-  getHealth: async () => {
+  getHealth: async (): Promise<HealthStatus> => {
     try {
-      const response = await api.get('/api/health');
+      const response: AxiosResponse<HealthStatus> = await api.get('/api/health');
       return response.data;
     } catch (error) {
       console.error('Failed to fetch health status:', error);
@@ -58,9 +66,9 @@ export const dnsApi = {
   },
 
   // Get version information
-  getVersion: async () => {
+  getVersion: async (): Promise<VersionInfo> => {
     try {
-      const response = await api.get('/api/version');
+      const response: AxiosResponse<VersionInfo> = await api.get('/api/version');
       return response.data;
     } catch (error) {
       console.error('Failed to fetch version:', error);
@@ -69,7 +77,12 @@ export const dnsApi = {
   },
 
   // Search DNS logs
-  searchLogs: async (searchTerm, limit = 100, offset = 0, since = null) => {
+  searchLogs: async (
+    searchTerm: string,
+    limit: number = 100,
+    offset: number = 0,
+    since: Date | string | null = null
+  ): Promise<SearchResponse> => {
     try {
       const params = new URLSearchParams();
       if (searchTerm) params.append('q', searchTerm);
@@ -78,7 +91,7 @@ export const dnsApi = {
 
       if (since !== null) {
         // Accept Date objects or ISO strings (server expects format: 2024-01-02T15:04:05Z)
-        let sinceStr;
+        let sinceStr: string;
         if (since instanceof Date) {
           // Convert to required format: 2024-01-02T15:04:05Z
           sinceStr = since.toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -88,7 +101,7 @@ export const dnsApi = {
         params.append('since', sinceStr);
       }
 
-      const response = await api.get(`/api/search?${params.toString()}`);
+      const response: AxiosResponse<SearchResponse> = await api.get(`/api/search?${params.toString()}`);
       return response.data;
     } catch (error) {
       console.error('Failed to search logs:', error);
@@ -97,9 +110,9 @@ export const dnsApi = {
   },
 
   // DNS mappings management
-  getDNSMappings: async () => {
+  getDNSMappings: async (): Promise<DNSMappingsResponse> => {
     try {
-      const response = await api.get('/api/dns-mappings');
+      const response: AxiosResponse<DNSMappingsResponse> = await api.get('/api/dns-mappings');
       return response.data;
     } catch (error) {
       console.error('Failed to fetch DNS mappings:', error);
@@ -107,9 +120,9 @@ export const dnsApi = {
     }
   },
 
-  addDNSMapping: async (domain, ip) => {
+  addDNSMapping: async (domain: string, ip: string): Promise<APIResponse> => {
     try {
-      const response = await api.post('/api/dns-mappings', { domain, ip });
+      const response: AxiosResponse<APIResponse> = await api.post('/api/dns-mappings', { domain, ip });
       return response.data;
     } catch (error) {
       console.error('Failed to add DNS mapping:', error);
@@ -117,10 +130,9 @@ export const dnsApi = {
     }
   },
 
-
-  deleteDNSMapping: async (domain) => {
+  deleteDNSMapping: async (domain: string): Promise<APIResponse> => {
     try {
-      const response = await api.delete(`/api/dns-mappings?domain=${encodeURIComponent(domain)}`);
+      const response: AxiosResponse<APIResponse> = await api.delete(`/api/dns-mappings?domain=${encodeURIComponent(domain)}`);
       return response.data;
     } catch (error) {
       console.error('Failed to delete DNS mapping:', error);

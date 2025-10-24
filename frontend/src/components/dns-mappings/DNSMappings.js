@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { dnsApi } from '../../services/api';
+import { dnsApi } from '../../services/api.ts';
 import DNSMappingsHeader from './DNSMappingsHeader';
 import StatusMessages from '../StatusMessages.tsx';
 import AddMappingForm from './AddMappingForm';

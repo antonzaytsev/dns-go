@@ -3,27 +3,7 @@ import { AlertCircle } from 'lucide-react';
 import { useRecentRequests } from '../hooks/useMetrics';
 import RecentRequests from './RecentRequests.tsx';
 import Navigation from './Navigation';
-
-interface DnsRequest {
-  uuid?: string;
-  timestamp: string;
-  request?: {
-    query?: string;
-    type?: string;
-    client?: string;
-  };
-  status: string;
-  duration_ms?: number;
-  response?: {
-    ips?: string[];
-  };
-  upstream?: string;
-}
-
-interface RecentRequestsFullHeightProps {
-  requests: DnsRequest[];
-  loading: boolean;
-}
+import type { RecentRequestsFullHeightProps } from '../types';
 
 const RecentRequestsPage: React.FC = () => {
   const { recentRequests, loading, error } = useRecentRequests(5000);

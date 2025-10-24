@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { dnsApi } from '../services/api';
+import { dnsApi } from '../services/api.ts';
 
 export const useMetrics = (refreshInterval = 5000) => {
   const [metrics, setMetrics] = useState(null);

@@ -1,35 +1,8 @@
 import React, { useState } from 'react';
 import { format } from 'date-fns';
 import { CheckCircle, XCircle, Database, Clock, ExternalLink, Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
-import { dnsApi } from '../services/api';
-
-interface DnsRequest {
-  uuid?: string;
-  timestamp: string;
-  request?: {
-    query?: string;
-    type?: string;
-    client?: string;
-  };
-  status: string;
-  duration_ms?: number;
-  response?: {
-    ips?: string[];
-  };
-  upstream?: string;
-}
-
-interface SearchResult {
-  results: DnsRequest[];
-  total: number;
-  source?: string;
-}
-
-interface RecentRequestsProps {
-  requests: DnsRequest[];
-  loading?: boolean;
-  fullHeight?: boolean;
-}
+import { dnsApi } from '../services/api.ts';
+import type { DnsRequest, SearchResponse, RecentRequestsProps } from '../types';
 
 const RecentRequests: React.FC<RecentRequestsProps> = ({ requests, loading: initialLoading = false, fullHeight = false }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -49,7 +22,7 @@ const RecentRequests: React.FC<RecentRequestsProps> = ({ requests, loading: init
     setSearchError(null);
 
     try {
-      const result = await dnsApi.searchLogs(term, pageSize, page * pageSize);
+      const result: SearchResponse = await dnsApi.searchLogs(term, pageSize, page * pageSize);
       setSearchResults(result.results || []);
       setTotalResults(result.total || 0);
       setSearchSource(result.source || 'unknown');
