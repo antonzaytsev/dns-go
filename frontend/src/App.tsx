@@ -6,7 +6,7 @@ import RecentRequestsPage from './components/RecentRequestsPage';
 import NotFound from './components/NotFound';
 import './App.css';
 
-function App() {
+const App: React.FC = () => {
   return (
     <div className="App">
       <Router>
@@ -19,6 +19,6 @@ function App() {
       </Router>
     </div>
   );
-}
+};
 
 export default App;
