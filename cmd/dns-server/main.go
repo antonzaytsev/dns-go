@@ -261,6 +261,9 @@ func (s *DNSServer) Start(ctx context.Context) error {
 	s.upstreamMgr.StartHealthChecks(s.config.HealthCheckInterval)
 	s.cache.StartCleanupTimer(5 * time.Minute)
 
+	// Start custom DNS configuration watcher
+	s.startCustomDNSWatcher(ctx)
+
 	// Setup DNS handler
 	dns.HandleFunc(".", s.handleDNSRequest)
 
@@ -330,6 +333,61 @@ func (s *DNSServer) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// startCustomDNSWatcher starts a background goroutine that monitors the custom DNS configuration file
+// for changes and reloads the resolver mappings when the file is modified
+func (s *DNSServer) startCustomDNSWatcher(ctx context.Context) {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+
+		s.logger.Info("Started custom DNS configuration watcher", map[string]interface{}{
+			"check_interval": "1 minute",
+		})
+
+		for {
+			select {
+			case <-ctx.Done():
+				s.logger.Info("Stopping custom DNS configuration watcher", nil)
+				return
+			case <-s.shutdown:
+				return
+			case <-ticker.C:
+				// Check if the custom DNS configuration file has changed
+				changed, err := s.config.HasCustomDNSFileChanged()
+				if err != nil {
+					s.logger.Error("Error checking custom DNS file changes", map[string]interface{}{
+						"error": err.Error(),
+					})
+					continue
+				}
+
+				if changed {
+					s.logger.Info("Custom DNS configuration file changed, reloading mappings", nil)
+
+					// Reload the custom DNS configuration
+					newMappings, err := s.config.ReloadCustomDNS()
+					if err != nil {
+						s.logger.Error("Failed to reload custom DNS configuration", map[string]interface{}{
+							"error": err.Error(),
+						})
+						continue
+					}
+
+					// Update the local resolver with new mappings
+					s.resolver.UpdateMappings(newMappings)
+
+					s.logger.Info("Successfully updated custom DNS mappings", map[string]interface{}{
+						"mapping_count": len(newMappings),
+					})
+				}
+			}
+		}
+	}()
 }
 
 // GetStats returns server statistics

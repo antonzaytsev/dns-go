@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -45,6 +46,11 @@ type Config struct {
 	Timeout             time.Duration     `json:"timeout"`
 	RetryAttempts       int               `json:"retry_attempts"`
 	HealthCheckInterval time.Duration     `json:"health_check_interval"`
+
+	// File watching for hot reload
+	customDNSPath    string
+	customDNSModTime time.Time
+	mutex            sync.RWMutex
 }
 
 // CustomDNSConfig represents the structure of the custom DNS configuration file
@@ -191,7 +197,7 @@ func (c *Config) Validate() error {
 func (c *Config) loadCustomDNS() error {
 	// Get the path to the custom DNS configuration file
 	configPath := customDNSConfigFile
-	
+
 	// Check if running from a different directory, try to find the config file relative to executable
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		// Try to find config file in the same directory as the executable
@@ -201,11 +207,21 @@ func (c *Config) loadCustomDNS() error {
 		}
 	}
 
+	// Store the resolved path for hot reload
+	c.customDNSPath = configPath
+
 	// Check if the config file exists
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+	fileInfo, err := os.Stat(configPath)
+	if os.IsNotExist(err) {
 		// File doesn't exist, which is fine - custom DNS feature is disabled
 		return nil
 	}
+	if err != nil {
+		return fmt.Errorf("failed to stat custom DNS config file %s: %w", configPath, err)
+	}
+
+	// Store modification time for hot reload tracking
+	c.customDNSModTime = fileInfo.ModTime()
 
 	// Read the configuration file
 	data, err := os.ReadFile(configPath)
@@ -228,16 +244,16 @@ func (c *Config) loadCustomDNS() error {
 	for domain, ip := range customDNSConfig.Mappings {
 		domain = strings.TrimSpace(domain)
 		ip = strings.TrimSpace(ip)
-		
+
 		if domain == "" || ip == "" {
 			return fmt.Errorf("invalid custom DNS mapping in config file: empty domain or IP")
 		}
-		
+
 		// Ensure domain ends with a dot for DNS processing
 		if !strings.HasSuffix(domain, ".") {
 			domain += "."
 		}
-		
+
 		// Config file mappings take precedence over command line
 		c.CustomDNS[domain] = ip
 	}
@@ -249,4 +265,105 @@ func (c *Config) loadCustomDNS() error {
 func (c *Config) String() string {
 	return fmt.Sprintf("Config{Listen: %s:%s, Upstreams: %v, LogLevel: %s, CacheSize: %d}",
 		c.ListenAddress, c.Port, c.UpstreamDNS, c.LogLevel, c.CacheSize)
+}
+
+// HasCustomDNSFileChanged checks if the custom DNS configuration file has been modified
+func (c *Config) HasCustomDNSFileChanged() (bool, error) {
+	c.mutex.RLock()
+	configPath := c.customDNSPath
+	lastModTime := c.customDNSModTime
+	c.mutex.RUnlock()
+
+	// If no path is stored, the file wasn't loaded initially
+	if configPath == "" {
+		return false, nil
+	}
+
+	// Check current modification time
+	fileInfo, err := os.Stat(configPath)
+	if os.IsNotExist(err) {
+		// File was deleted - this is a change
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to stat custom DNS config file: %w", err)
+	}
+
+	// Compare modification times
+	return fileInfo.ModTime().After(lastModTime), nil
+}
+
+// ReloadCustomDNS reloads the custom DNS configuration from file and returns the new mappings
+func (c *Config) ReloadCustomDNS() (map[string]string, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	// If no path is stored, nothing to reload
+	if c.customDNSPath == "" {
+		return nil, nil
+	}
+
+	// Check if file exists
+	fileInfo, err := os.Stat(c.customDNSPath)
+	if os.IsNotExist(err) {
+		// File was deleted - clear mappings
+		c.customDNSModTime = time.Time{}
+		c.CustomDNS = make(map[string]string)
+		return c.CustomDNS, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat custom DNS config file: %w", err)
+	}
+
+	// Update modification time
+	c.customDNSModTime = fileInfo.ModTime()
+
+	// Read the configuration file
+	data, err := os.ReadFile(c.customDNSPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read custom DNS config file: %w", err)
+	}
+
+	// Parse the JSON configuration
+	var customDNSConfig CustomDNSConfig
+	if err := json.Unmarshal(data, &customDNSConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse custom DNS config file: %w", err)
+	}
+
+	// Create new mappings
+	newMappings := make(map[string]string)
+
+	// Process and normalize the mappings from the config file
+	for domain, ip := range customDNSConfig.Mappings {
+		domain = strings.TrimSpace(domain)
+		ip = strings.TrimSpace(ip)
+
+		if domain == "" || ip == "" {
+			return nil, fmt.Errorf("invalid custom DNS mapping in config file: empty domain or IP")
+		}
+
+		// Ensure domain ends with a dot for DNS processing
+		if !strings.HasSuffix(domain, ".") {
+			domain += "."
+		}
+
+		newMappings[domain] = ip
+	}
+
+	// Update the config's custom DNS mappings
+	c.CustomDNS = newMappings
+
+	return newMappings, nil
+}
+
+// GetCustomDNS returns a thread-safe copy of the current custom DNS mappings
+func (c *Config) GetCustomDNS() map[string]string {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	mappings := make(map[string]string, len(c.CustomDNS))
+	for domain, ip := range c.CustomDNS {
+		mappings[domain] = ip
+	}
+	return mappings
 }
