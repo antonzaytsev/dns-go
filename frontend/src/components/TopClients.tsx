@@ -1,7 +1,19 @@
 import React from 'react';
 import { format } from 'date-fns';
 
-const TopClients = ({ clients }) => {
+interface Client {
+  ip: string;
+  requests: number;
+  cache_hit_rate: number;
+  success_rate: number;
+  last_seen: string;
+}
+
+interface TopClientsProps {
+  clients: Client[];
+}
+
+const TopClients: React.FC<TopClientsProps> = ({ clients }) => {
   if (!clients || clients.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow-md p-6">
@@ -13,7 +25,7 @@ const TopClients = ({ clients }) => {
     );
   }
 
-  const formatNumber = (num) => {
+  const formatNumber = (num: number): string => {
     if (num >= 1000000) {
       return (num / 1000000).toFixed(1) + 'M';
     } else if (num >= 1000) {

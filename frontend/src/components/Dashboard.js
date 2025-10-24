@@ -4,7 +4,7 @@ import { useMetrics, useHealth } from '../hooks/useMetrics';
 import OverviewCards from './OverviewCards';
 import Charts from './Charts';
 import QueryTypes from './QueryTypes';
-import TopClients from './TopClients';
+import TopClients from './TopClients.tsx';
 import ConnectionStatus from './ConnectionStatus';
 import Navigation from './Navigation';
 
