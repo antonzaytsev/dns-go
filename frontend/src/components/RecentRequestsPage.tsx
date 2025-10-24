@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertCircle } from 'lucide-react';
-import { useRecentRequests } from '../hooks/useMetrics';
+import { useRecentRequests } from '../hooks/useMetrics.ts';
 import RecentRequests from './RecentRequests.tsx';
 import Navigation from './Navigation';
 import type { RecentRequestsFullHeightProps } from '../types';

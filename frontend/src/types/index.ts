@@ -93,3 +93,27 @@ export interface RecentRequestsFullHeightProps {
   requests: DnsRequest[];
   loading: boolean;
 }
+
+// Hook return types
+export interface UseMetricsReturn {
+  metrics: Metrics | null;
+  loading: boolean;
+  error: string | null;
+  lastUpdated: Date | null;
+  refresh: () => void;
+}
+
+export interface UseHealthReturn {
+  health: HealthStatus | null;
+  loading: boolean;
+  error: string | null;
+  isHealthy: boolean;
+}
+
+export interface UseRecentRequestsReturn {
+  recentRequests: DnsRequest[];
+  loading: boolean;
+  error: string | null;
+  lastUpdated: Date | null;
+  refresh: () => void;
+}
