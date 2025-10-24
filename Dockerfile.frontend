@@ -2,17 +2,3 @@
 FROM node:18-alpine
 
 WORKDIR /app
-
-# Copy package files
-COPY frontend/package*.json ./
-
-# Install dependencies
-RUN npm install
-
-# Copy source code
-COPY frontend/ ./
-
-# Set environment variables for React dev server
-ENV WATCHPACK_POLLING=true
-ENV WDS_SOCKET_HOST=0.0.0.0
-ENV WDS_SOCKET_PORT=0

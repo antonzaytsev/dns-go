@@ -37,3 +37,5 @@ custom-dns.json
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+frontend/node_modules
