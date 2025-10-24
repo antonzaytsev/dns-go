@@ -1,20 +1,29 @@
 import { useState, useEffect, useCallback } from 'react';
 import { dnsApi } from '../services/api.ts';
+import type { 
+  Metrics, 
+  HealthStatus, 
+  DnsRequest, 
+  SearchResponse, 
+  UseMetricsReturn,
+  UseHealthReturn,
+  UseRecentRequestsReturn 
+} from '../types';
 
-export const useMetrics = (refreshInterval = 5000) => {
-  const [metrics, setMetrics] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(null);
+export const useMetrics = (refreshInterval: number = 5000): UseMetricsReturn => {
+  const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  const fetchMetrics = useCallback(async () => {
+  const fetchMetrics = useCallback(async (): Promise<void> => {
     try {
       setError(null);
-      const data = await dnsApi.getMetrics();
+      const data: Metrics = await dnsApi.getMetrics();
       setMetrics(data);
       setLastUpdated(new Date());
       setLoading(false);
-    } catch (err) {
+    } catch (err: any) {
       setError(err.message || 'Failed to fetch metrics');
       setLoading(false);
     }
@@ -25,14 +34,14 @@ export const useMetrics = (refreshInterval = 5000) => {
     fetchMetrics();
 
     // Set up interval for periodic updates
-    const interval = setInterval(fetchMetrics, refreshInterval);
+    const interval: NodeJS.Timeout = setInterval(fetchMetrics, refreshInterval);
 
     // Cleanup interval on unmount
     return () => clearInterval(interval);
   }, [fetchMetrics, refreshInterval]);
 
   // Manual refresh function
-  const refresh = useCallback(() => {
+  const refresh = useCallback((): void => {
     setLoading(true);
     fetchMetrics();
   }, [fetchMetrics]);
@@ -46,18 +55,18 @@ export const useMetrics = (refreshInterval = 5000) => {
   };
 };
 
-export const useHealth = (refreshInterval = 30000) => {
-  const [health, setHealth] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+export const useHealth = (refreshInterval: number = 30000): UseHealthReturn => {
+  const [health, setHealth] = useState<HealthStatus | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const fetchHealth = useCallback(async () => {
+  const fetchHealth = useCallback(async (): Promise<void> => {
     try {
       setError(null);
-      const data = await dnsApi.getHealth();
+      const data: HealthStatus = await dnsApi.getHealth();
       setHealth(data);
       setLoading(false);
-    } catch (err) {
+    } catch (err: any) {
       setError(err.message || 'Failed to fetch health status');
       setLoading(false);
     }
@@ -65,7 +74,7 @@ export const useHealth = (refreshInterval = 30000) => {
 
   useEffect(() => {
     fetchHealth();
-    const interval = setInterval(fetchHealth, refreshInterval);
+    const interval: NodeJS.Timeout = setInterval(fetchHealth, refreshInterval);
     return () => clearInterval(interval);
   }, [fetchHealth, refreshInterval]);
 
@@ -77,21 +86,21 @@ export const useHealth = (refreshInterval = 30000) => {
   };
 };
 
-export const useRecentRequests = (refreshInterval = 5000) => {
-  const [recentRequests, setRecentRequests] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(null);
+export const useRecentRequests = (refreshInterval: number = 5000): UseRecentRequestsReturn => {
+  const [recentRequests, setRecentRequests] = useState<DnsRequest[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  const fetchRecentRequests = useCallback(async () => {
+  const fetchRecentRequests = useCallback(async (): Promise<void> => {
     try {
       setError(null);
       // Load last 50 requests using empty search query
-      const data = await dnsApi.searchLogs('', 50, 0);
+      const data: SearchResponse = await dnsApi.searchLogs('', 50, 0);
       setRecentRequests(data.results || []);
       setLastUpdated(new Date());
       setLoading(false);
-    } catch (err) {
+    } catch (err: any) {
       setError(err.message || 'Failed to fetch recent requests');
       setLoading(false);
     }
@@ -102,14 +111,14 @@ export const useRecentRequests = (refreshInterval = 5000) => {
     fetchRecentRequests();
 
     // Set up interval for periodic updates
-    const interval = setInterval(fetchRecentRequests, refreshInterval);
+    const interval: NodeJS.Timeout = setInterval(fetchRecentRequests, refreshInterval);
 
     // Cleanup interval on unmount
     return () => clearInterval(interval);
   }, [fetchRecentRequests, refreshInterval]);
 
   // Manual refresh function
-  const refresh = useCallback(() => {
+  const refresh = useCallback((): void => {
     setLoading(true);
     fetchRecentRequests();
   }, [fetchRecentRequests]);

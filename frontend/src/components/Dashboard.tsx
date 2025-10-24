@@ -8,7 +8,7 @@ import TopClients from './TopClients.tsx';
 import ConnectionStatus from './ConnectionStatus';
 import Navigation from './Navigation';
 
-const Dashboard = () => {
+const Dashboard: React.FC = () => {
   const { metrics, loading, error, lastUpdated, refresh } = useMetrics(5000);
   const { isHealthy } = useHealth(30000);
 
