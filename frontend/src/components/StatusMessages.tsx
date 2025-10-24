@@ -1,7 +1,12 @@
 import React from 'react';
 import { AlertCircle, CheckCircle } from 'lucide-react';
 
-const StatusMessages = ({ error, success }) => {
+interface StatusMessagesProps {
+  error?: string | null;
+  success?: string | null;
+}
+
+const StatusMessages: React.FC<StatusMessagesProps> = ({ error, success }) => {
   if (!error && !success) return null;
 
   return (
