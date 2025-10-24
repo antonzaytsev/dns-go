@@ -1,6 +1,8 @@
 services:
   dns-server:
     build: .
+    env_file:
+      - .env
     ports:
       - "${DNS_HOST_PORT:-53}:${DNS_PORT:-53}/udp"
     volumes:
@@ -8,7 +10,8 @@ services:
     environment:
       - DNS_LISTEN=${DNS_LISTEN_ADDRESS:-0.0.0.0}
       - DNS_PORT=${DNS_PORT:-53}
-      - ELASTICSEARCH_URL=${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+      - ELASTICSEARCH_HOST=${ELASTICSEARCH_HOST:-elasticsearch}
+      - ELASTICSEARCH_PORT=${ELASTICSEARCH_PORT:-9200}
       - ELASTICSEARCH_INDEX=${ELASTICSEARCH_INDEX:-dns-logs}
     command: [
       "./dns-server",
@@ -42,6 +45,8 @@ services:
         VERSION: ${VERSION:-dev}
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
+    env_file:
+      - .env
     ports:
       - "${API_HOST_PORT:-8080}:8080"
     volumes:
@@ -49,7 +54,8 @@ services:
     environment:
       - API_PORT=8080
       - DNS_LOG_FILE=${DNS_LOG_FILE:-/logs/dns-requests.log}
-      - ELASTICSEARCH_URL=${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+      - ELASTICSEARCH_HOST=${ELASTICSEARCH_HOST:-elasticsearch}
+      - ELASTICSEARCH_PORT=${ELASTICSEARCH_PORT:-9200}
       - ELASTICSEARCH_INDEX=${ELASTICSEARCH_INDEX:-dns-logs}
     command: [
       "./api-server",
@@ -73,6 +79,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+    env_file:
+      - .env
     ports:
       - "${FRONTEND_HOST_PORT:-3000}:3000"
     environment:
@@ -94,6 +102,8 @@ services:
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    env_file:
+      - .env
     environment:
       - node.name=dns-elasticsearch
       - cluster.name=dns-cluster
@@ -109,10 +119,10 @@ services:
     volumes:
       - elasticsearch-data:/usr/share/elasticsearch/data
     ports:
-      - "${ELASTIC_HOST_PORT:-9200}:9200"
+      - "${ELASTICSEARCH_PORT:-9200}:9200"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:${ELASTICSEARCH_PORT:-9200}/_cluster/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -111,14 +111,18 @@ func NewFromConfig(logFile string, logLevel string) (*Logger, *os.File, *os.File
 	}
 
 	// Try to initialize Elasticsearch client with retry logic
-	if esURL := os.Getenv("ELASTICSEARCH_URL"); esURL != "" {
+	esHost := os.Getenv("ELASTICSEARCH_HOST")
+	esPort := os.Getenv("ELASTICSEARCH_PORT")
+
+	if esHost != "" || esPort != "" {
 		esIndex := os.Getenv("ELASTICSEARCH_INDEX")
 		if esIndex == "" {
 			esIndex = "dns-logs"
 		}
 
 		cfg := elasticsearch.Config{
-			URL:   esURL,
+			Host:  esHost,
+			Port:  esPort,
 			Index: esIndex,
 		}
 
@@ -150,6 +154,52 @@ func NewFromConfig(logFile string, logLevel string) (*Logger, *os.File, *os.File
 						logger.humanLogger.Printf("⚠️  Warning: DNS server failed to initialize Elasticsearch client after %d attempts: %v", maxRetries, err)
 					} else {
 						log.Printf("⚠️  Warning: DNS server failed to initialize Elasticsearch client after %d attempts: %v", maxRetries, err)
+					}
+				}
+			}
+		}
+	} else {
+		// Fallback to URL for backward compatibility
+		if esURL := os.Getenv("ELASTICSEARCH_URL"); esURL != "" {
+			esIndex := os.Getenv("ELASTICSEARCH_INDEX")
+			if esIndex == "" {
+				esIndex = "dns-logs"
+			}
+
+			cfg := elasticsearch.Config{
+				URL:   esURL,
+				Index: esIndex,
+			}
+
+			// Retry connecting to Elasticsearch with exponential backoff
+			maxRetries := 5
+			for i := 0; i < maxRetries; i++ {
+				if esClient, err := elasticsearch.NewClient(cfg); err == nil {
+					logger.esClient = esClient
+					if logger.humanLogger != nil {
+						logger.humanLogger.Printf("✅ DNS server Elasticsearch client initialized successfully")
+					} else {
+						log.Printf("✅ DNS server Elasticsearch client initialized successfully")
+					}
+					break
+				} else {
+					if i < maxRetries-1 {
+						waitTime := time.Duration(1<<uint(i)) * time.Second // 1s, 2s, 4s, 8s
+						if logger.humanLogger != nil {
+							logger.humanLogger.Printf("⏳ DNS server Elasticsearch connection attempt %d/%d failed: %v. Retrying in %v...",
+								i+1, maxRetries, err, waitTime)
+						} else {
+							log.Printf("⏳ DNS server Elasticsearch connection attempt %d/%d failed: %v. Retrying in %v...",
+								i+1, maxRetries, err, waitTime)
+						}
+						time.Sleep(waitTime)
+					} else {
+						// Log ES initialization failure but don't fail the logger
+						if logger.humanLogger != nil {
+							logger.humanLogger.Printf("⚠️  Warning: DNS server failed to initialize Elasticsearch client after %d attempts: %v", maxRetries, err)
+						} else {
+							log.Printf("⚠️  Warning: DNS server failed to initialize Elasticsearch client after %d attempts: %v", maxRetries, err)
+						}
 					}
 				}
 			}

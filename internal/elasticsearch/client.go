@@ -18,7 +18,8 @@ import (
 )
 
 const (
-	DefaultURL   = "http://localhost:9200"
+	DefaultHost  = "localhost"
+	DefaultPort  = "9200"
 	DefaultIndex = "dns-logs"
 )
 
@@ -30,22 +31,42 @@ type Client struct {
 
 // Config holds Elasticsearch configuration
 type Config struct {
-	URL   string
+	Host  string
+	Port  string
+	URL   string // Deprecated: use Host and Port instead
 	Index string
 }
 
 // NewClient creates a new Elasticsearch client
 func NewClient(cfg Config) (*Client, error) {
-	if cfg.URL == "" {
-		cfg.URL = getEnvOrDefault("ELASTICSEARCH_URL", DefaultURL)
+	// Determine URL from host/port or fallback to URL field
+	var url string
+	if cfg.Host != "" || cfg.Port != "" {
+		// Use host and port
+		host := getEnvOrDefault("ELASTICSEARCH_HOST", cfg.Host)
+		if host == "" {
+			host = DefaultHost
+		}
+		port := getEnvOrDefault("ELASTICSEARCH_PORT", cfg.Port)
+		if port == "" {
+			port = DefaultPort
+		}
+		url = fmt.Sprintf("http://%s:%s", host, port)
+	} else {
+		// Fallback to URL field for backward compatibility
+		url = cfg.URL
+		if url == "" {
+			url = getEnvOrDefault("ELASTICSEARCH_URL", fmt.Sprintf("http://%s:%s", DefaultHost, DefaultPort))
+		}
 	}
+
 	if cfg.Index == "" {
 		cfg.Index = getEnvOrDefault("ELASTICSEARCH_INDEX", DefaultIndex)
 	}
 
 	// Configure Elasticsearch client
 	esCfg := elasticsearch.Config{
-		Addresses: []string{cfg.URL},
+		Addresses: []string{url},
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},

@@ -55,16 +55,20 @@ func NewServer(cfg Config) (*Server, error) {
 		fmt.Println("Warning: No DNS log file found. Real-time metrics will not be available.")
 	}
 
-	// Initialize Elasticsearch client if URL is provided
+	// Initialize Elasticsearch client if host and port are provided
 	var esClient *elasticsearch.Client
-	if esURL := os.Getenv("ELASTICSEARCH_URL"); esURL != "" {
+	esHost := os.Getenv("ELASTICSEARCH_HOST")
+	esPort := os.Getenv("ELASTICSEARCH_PORT")
+
+	if esHost != "" || esPort != "" {
 		esIndex := os.Getenv("ELASTICSEARCH_INDEX")
 		if esIndex == "" {
 			esIndex = "dns-logs"
 		}
 
 		esCfg := elasticsearch.Config{
-			URL:   esURL,
+			Host:  esHost,
+			Port:  esPort,
 			Index: esIndex,
 		}
 
@@ -76,7 +80,28 @@ func NewServer(cfg Config) (*Server, error) {
 			fmt.Println("📝 Falling back to file-based log search")
 		}
 	} else {
-		fmt.Println("📝 No Elasticsearch URL provided, using file-based log search")
+		// Fallback to URL for backward compatibility
+		if esURL := os.Getenv("ELASTICSEARCH_URL"); esURL != "" {
+			esIndex := os.Getenv("ELASTICSEARCH_INDEX")
+			if esIndex == "" {
+				esIndex = "dns-logs"
+			}
+
+			esCfg := elasticsearch.Config{
+				URL:   esURL,
+				Index: esIndex,
+			}
+
+			if client, err := elasticsearch.NewClient(esCfg); err == nil {
+				esClient = client
+				fmt.Println("✅ Elasticsearch client initialized successfully")
+			} else {
+				fmt.Printf("⚠️  Warning: Failed to initialize Elasticsearch client: %v\n", err)
+				fmt.Println("📝 Falling back to file-based log search")
+			}
+		} else {
+			fmt.Println("📝 No Elasticsearch host/port or URL provided, using file-based log search")
+		}
 	}
 
 	s := &Server{
