@@ -7,7 +7,7 @@ import QueryTypes from './QueryTypes';
 import TopClients from './TopClients';
 import RecentRequests from './RecentRequests';
 import ConnectionStatus from './ConnectionStatus';
-import DNSMappings from './DNSMappings';
+import DNSMappings from './dns-mappings';
 
 const Dashboard = () => {
   const { metrics, loading, error, lastUpdated, refresh } = useMetrics(5000);
