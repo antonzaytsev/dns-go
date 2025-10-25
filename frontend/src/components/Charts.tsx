@@ -98,8 +98,85 @@ const Charts: React.FC<ChartsProps> = ({ timeSeriesData }) => {
     })).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   };
 
-  // Process minute data (per minute for last hour)
-  const minuteData: TimeSeriesDataPoint[] = timeSeriesData.requests_last_hour || [];
+  // Helper function to generate exactly 75 time slots and fill with data
+  const generateTimeSlots = (
+    data: TimeSeriesDataPoint[], 
+    timeUnit: 'minute' | 'hour' | 'day' | 'week'
+  ): TimeSeriesDataPoint[] => {
+    const now = new Date();
+    const slots: TimeSeriesDataPoint[] = [];
+    const dataMap = new Map<string, number>();
+    
+    // Create a map of existing data
+    data.forEach(point => {
+      const date = new Date(point.timestamp);
+      let key: string;
+      
+      switch (timeUnit) {
+        case 'minute':
+          key = format(date.getTime() - (date.getTime() % 60000), 'yyyy-MM-dd HH:mm');
+          break;
+        case 'hour':
+          key = format(date.getTime() - (date.getTime() % 3600000), 'yyyy-MM-dd HH:00');
+          break;
+        case 'day':
+          key = format(date, 'yyyy-MM-dd');
+          break;
+        case 'week':
+          const weekStart = startOfWeek(date, { weekStartsOn: 1 });
+          key = format(weekStart, 'yyyy-MM-dd');
+          break;
+        default:
+          key = format(date, 'yyyy-MM-dd');
+      }
+      
+      dataMap.set(key, (dataMap.get(key) || 0) + point.value);
+    });
+    
+    // Generate 75 time slots going backwards from now
+    for (let i = 74; i >= 0; i--) {
+      let slotTime: Date;
+      let key: string;
+      
+      switch (timeUnit) {
+        case 'minute':
+          slotTime = new Date(now.getTime() - (i * 60000));
+          slotTime.setSeconds(0, 0);
+          key = format(slotTime, 'yyyy-MM-dd HH:mm');
+          break;
+        case 'hour':
+          slotTime = new Date(now.getTime() - (i * 3600000));
+          slotTime.setMinutes(0, 0, 0);
+          key = format(slotTime, 'yyyy-MM-dd HH:00');
+          break;
+        case 'day':
+          slotTime = new Date(now.getTime() - (i * 24 * 3600000));
+          slotTime.setHours(0, 0, 0, 0);
+          key = format(slotTime, 'yyyy-MM-dd');
+          break;
+        case 'week':
+          const weekAgo = new Date(now.getTime() - (i * 7 * 24 * 3600000));
+          slotTime = startOfWeek(weekAgo, { weekStartsOn: 1 });
+          key = format(slotTime, 'yyyy-MM-dd');
+          break;
+        default:
+          slotTime = new Date(now.getTime() - (i * 24 * 3600000));
+          slotTime.setHours(0, 0, 0, 0);
+          key = format(slotTime, 'yyyy-MM-dd');
+      }
+      
+      slots.push({
+        timestamp: slotTime.toISOString(),
+        value: dataMap.get(key) || 0
+      });
+    }
+    
+    return slots;
+  };
+
+  // Process minute data (per minute for last 75 minutes)
+  const rawMinuteData: TimeSeriesDataPoint[] = timeSeriesData.requests_last_hour || [];
+  const minuteData: TimeSeriesDataPoint[] = generateTimeSlots(rawMinuteData, 'minute');
   const minuteChartData = {
     labels: minuteData.map((point: TimeSeriesDataPoint): string => {
       const date = new Date(point.timestamp);
@@ -116,8 +193,9 @@ const Charts: React.FC<ChartsProps> = ({ timeSeriesData }) => {
     ],
   };
 
-  // Process hour data (per hour for last day)
-  const hourData: TimeSeriesDataPoint[] = timeSeriesData.requests_last_day || [];
+  // Process hour data (per hour for last 75 hours)
+  const rawHourData: TimeSeriesDataPoint[] = timeSeriesData.requests_last_day || [];
+  const hourData: TimeSeriesDataPoint[] = generateTimeSlots(rawHourData, 'hour');
   const hourChartData = {
     labels: hourData.map((point: TimeSeriesDataPoint): string => {
       const date = new Date(point.timestamp);
@@ -134,8 +212,9 @@ const Charts: React.FC<ChartsProps> = ({ timeSeriesData }) => {
     ],
   };
 
-  // Process day data (per day for last week)
-  const dayData: TimeSeriesDataPoint[] = timeSeriesData.requests_last_week || [];
+  // Process day data (per day for last 75 days)
+  const rawDayData: TimeSeriesDataPoint[] = timeSeriesData.requests_last_week || [];
+  const dayData: TimeSeriesDataPoint[] = generateTimeSlots(rawDayData, 'day');
   const dayChartData = {
     labels: dayData.map((point: TimeSeriesDataPoint): string => {
       const date = new Date(point.timestamp);
@@ -152,9 +231,10 @@ const Charts: React.FC<ChartsProps> = ({ timeSeriesData }) => {
     ],
   };
 
-  // Process week data (aggregate daily data into weekly buckets)
+  // Process week data (aggregate daily data into weekly buckets for last 75 weeks)
   const monthlyDailyData: TimeSeriesDataPoint[] = timeSeriesData.requests_last_month || [];
-  const weekData: TimeSeriesDataPoint[] = aggregateByWeek(monthlyDailyData);
+  const aggregatedWeekData: TimeSeriesDataPoint[] = aggregateByWeek(monthlyDailyData);
+  const weekData: TimeSeriesDataPoint[] = generateTimeSlots(aggregatedWeekData, 'week');
   const weekChartData = {
     labels: weekData.map((point: TimeSeriesDataPoint): string => {
       const weekStart = new Date(point.timestamp);
@@ -179,31 +259,31 @@ const Charts: React.FC<ChartsProps> = ({ timeSeriesData }) => {
         return {
           data: minuteChartData,
           component: Bar,
-          title: 'Requests per Minute (Last Hour)'
+          title: 'Requests per Minute (Last 75 Minutes)'
         };
       case 'hour':
         return {
           data: hourChartData,
           component: Bar,
-          title: 'Requests per Hour (Last Day)'
+          title: 'Requests per Hour (Last 75 Hours)'
         };
       case 'day':
         return {
           data: dayChartData,
           component: Bar,
-          title: 'Requests per Day (Last Week)'
+          title: 'Requests per Day (Last 75 Days)'
         };
       case 'week':
         return {
           data: weekChartData,
           component: Bar,
-          title: 'Requests per Week (Last Month)'
+          title: 'Requests per Week (Last 75 Weeks)'
         };
       default:
         return {
           data: hourChartData,
           component: Bar,
-          title: 'Requests per Hour (Last Day)'
+          title: 'Requests per Hour (Last 75 Hours)'
         };
     }
   };

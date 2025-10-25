@@ -340,32 +340,32 @@ func (m *Metrics) LoadFromLogFile(logFilePath string) error {
 func (m *Metrics) cleanOldTimeData() {
 	now := time.Now()
 
-	// Clean minute data (keep last 2 hours)
-	cutoffMinute := now.Add(-2 * time.Hour).Truncate(time.Minute).Unix()
+	// Clean minute data (keep last 80 minutes - allows for 75+ bars)
+	cutoffMinute := now.Add(-80 * time.Minute).Truncate(time.Minute).Unix()
 	for timestamp := range m.requestsLastHour {
 		if timestamp < cutoffMinute {
 			delete(m.requestsLastHour, timestamp)
 		}
 	}
 
-	// Clean hour data (keep last 2 days)
-	cutoffHour := now.Add(-48 * time.Hour).Truncate(time.Hour).Unix()
+	// Clean hour data (keep last 80 hours - allows for 75+ bars)
+	cutoffHour := now.Add(-80 * time.Hour).Truncate(time.Hour).Unix()
 	for timestamp := range m.requestsLastDay {
 		if timestamp < cutoffHour {
 			delete(m.requestsLastDay, timestamp)
 		}
 	}
 
-	// Clean week data (keep last 2 weeks)
-	cutoffWeek := now.Add(-14 * 24 * time.Hour).Truncate(24 * time.Hour).Unix()
+	// Clean day data (keep last 80 days - allows for 75+ bars)
+	cutoffWeek := now.Add(-80 * 24 * time.Hour).Truncate(24 * time.Hour).Unix()
 	for timestamp := range m.requestsLastWeek {
 		if timestamp < cutoffWeek {
 			delete(m.requestsLastWeek, timestamp)
 		}
 	}
 
-	// Clean month data (keep last 2 months)
-	cutoffMonth := now.Add(-60 * 24 * time.Hour).Truncate(24 * time.Hour).Unix()
+	// Clean month data (keep last 540 days - allows for 75+ weeks of bars when aggregated by week)
+	cutoffMonth := now.Add(-540 * 24 * time.Hour).Truncate(24 * time.Hour).Unix()
 	for timestamp := range m.requestsLastMonth {
 		if timestamp < cutoffMonth {
 			delete(m.requestsLastMonth, timestamp)
