@@ -3,31 +3,27 @@ import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
-  PointElement,
-  LineElement,
   BarElement,
   Title,
   Tooltip,
   Legend,
   ChartOptions,
 } from 'chart.js';
-import { Line, Bar } from 'react-chartjs-2';
-import { format } from 'date-fns';
+import { Bar } from 'react-chartjs-2';
+import { format, startOfWeek, endOfWeek } from 'date-fns';
 import { Clock, BarChart3, Calendar, CalendarDays } from 'lucide-react';
 import type { ChartsProps, TimeSeriesDataPoint } from '../types';
 
 ChartJS.register(
   CategoryScale,
   LinearScale,
-  PointElement,
-  LineElement,
   BarElement,
   Title,
   Tooltip,
   Legend
 );
 
-const chartOptions: ChartOptions<'line' | 'bar'> = {
+const chartOptions: ChartOptions<'bar'> = {
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
@@ -85,6 +81,22 @@ const Charts: React.FC<ChartsProps> = ({ timeSeriesData }) => {
     );
   }
 
+  // Helper function to aggregate daily data into weekly buckets
+  const aggregateByWeek = (data: TimeSeriesDataPoint[]): TimeSeriesDataPoint[] => {
+    const weekMap = new Map<string, number>();
+    
+    data.forEach(point => {
+      const date = new Date(point.timestamp);
+      const weekStart = startOfWeek(date, { weekStartsOn: 1 }); // Monday as start of week
+      const weekKey = format(weekStart, 'yyyy-MM-dd');
+      weekMap.set(weekKey, (weekMap.get(weekKey) || 0) + point.value);
+    });
+
+    return Array.from(weekMap.entries()).map(([dateStr, value]) => ({
+      timestamp: new Date(dateStr).toISOString(),
+      value
+    })).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  };
 
   // Process minute data (per minute for last hour)
   const minuteData: TimeSeriesDataPoint[] = timeSeriesData.requests_last_hour || [];
@@ -97,10 +109,9 @@ const Charts: React.FC<ChartsProps> = ({ timeSeriesData }) => {
       {
         label: 'Requests per Minute',
         data: minuteData.map((point: TimeSeriesDataPoint): number => point.value),
+        backgroundColor: 'rgba(59, 130, 246, 0.8)',
         borderColor: 'rgb(59, 130, 246)',
-        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-        fill: true,
-        tension: 0.4,
+        borderWidth: 1,
       },
     ],
   };
@@ -141,21 +152,22 @@ const Charts: React.FC<ChartsProps> = ({ timeSeriesData }) => {
     ],
   };
 
-  // Process week data (per day for last month)
-  const weekData: TimeSeriesDataPoint[] = timeSeriesData.requests_last_month || [];
+  // Process week data (aggregate daily data into weekly buckets)
+  const monthlyDailyData: TimeSeriesDataPoint[] = timeSeriesData.requests_last_month || [];
+  const weekData: TimeSeriesDataPoint[] = aggregateByWeek(monthlyDailyData);
   const weekChartData = {
     labels: weekData.map((point: TimeSeriesDataPoint): string => {
-      const date = new Date(point.timestamp);
-      return format(date, 'MMM dd');
+      const weekStart = new Date(point.timestamp);
+      const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
+      return `${format(weekStart, 'MMM dd')} - ${format(weekEnd, 'MMM dd')}`;
     }),
     datasets: [
       {
-        label: 'Requests per Day',
+        label: 'Requests per Week',
         data: weekData.map((point: TimeSeriesDataPoint): number => point.value),
+        backgroundColor: 'rgba(168, 85, 247, 0.8)',
         borderColor: 'rgb(168, 85, 247)',
-        backgroundColor: 'rgba(168, 85, 247, 0.1)',
-        fill: true,
-        tension: 0.4,
+        borderWidth: 1,
       },
     ],
   };
@@ -166,7 +178,7 @@ const Charts: React.FC<ChartsProps> = ({ timeSeriesData }) => {
       case 'minute':
         return {
           data: minuteChartData,
-          component: Line,
+          component: Bar,
           title: 'Requests per Minute (Last Hour)'
         };
       case 'hour':
@@ -184,8 +196,8 @@ const Charts: React.FC<ChartsProps> = ({ timeSeriesData }) => {
       case 'week':
         return {
           data: weekChartData,
-          component: Line,
-          title: 'Requests per Day (Last Month)'
+          component: Bar,
+          title: 'Requests per Week (Last Month)'
         };
       default:
         return {
