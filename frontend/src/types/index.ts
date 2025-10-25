@@ -53,6 +53,21 @@ export interface Client {
   last_seen: string;
 }
 
+export interface OverviewMetrics {
+  uptime: string;
+  total_requests: number;
+  requests_per_second: number;
+  cache_hit_rate: number;
+  success_rate: number;
+  average_response_time_ms: number;
+  active_clients: number;
+}
+
+export interface QueryTypeMetric {
+  type: string;
+  count: number;
+}
+
 export interface Metrics {
   total_requests?: number;
   cache_hits?: number;
@@ -61,7 +76,7 @@ export interface Metrics {
   failed_requests?: number;
   avg_response_time?: number;
   clients?: Client[];
-  query_types?: Record<string, number>;
+  query_types?: QueryTypeMetric[]; // Pre-sorted, top 8 query types
   recent_requests?: DnsRequest[];
   uptime?: string;
   version?: string;
@@ -144,7 +159,7 @@ export interface UseRecentRequestsReturn extends BaseHookReturn {
 // ===== TIME SERIES & CHARTS =====
 
 export interface TimeSeriesDataPoint {
-  timestamp: string;
+  timestamp: number;
   value: number;
 }
 

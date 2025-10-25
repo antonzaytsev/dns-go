@@ -12,7 +12,6 @@ const RecentRequests: React.FC<RecentRequestsProps> = ({ requests, loading: init
   const [currentPage, setCurrentPage] = useState<number>(0);
   const [totalResults, setTotalResults] = useState<number>(0);
   const [searchPerformed, setSearchPerformed] = useState<boolean>(false);
-  const [searchSource, setSearchSource] = useState<string | null>(null);
 
   const pageSize: number = 50;
 
@@ -25,7 +24,6 @@ const RecentRequests: React.FC<RecentRequestsProps> = ({ requests, loading: init
       const result: SearchResponse = await dnsApi.searchLogs(term, pageSize, page * pageSize);
       setSearchResults(result.results || []);
       setTotalResults(result.total || 0);
-      setSearchSource(result.source || 'unknown');
       setCurrentPage(page);
       setSearchPerformed(true);
     } catch (error) {
@@ -59,7 +57,6 @@ const RecentRequests: React.FC<RecentRequestsProps> = ({ requests, loading: init
     setCurrentPage(0);
     setTotalResults(0);
     setSearchError(null);
-    setSearchSource(null);
   };
 
   // Pagination handlers

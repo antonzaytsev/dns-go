@@ -68,12 +68,18 @@ type UpstreamStats struct {
 	RTTCount          int64     `json:"-"`
 }
 
+// QueryTypeMetric represents a query type with its count (sorted by backend)
+type QueryTypeMetric struct {
+	Type  string `json:"type"`
+	Count int64  `json:"count"`
+}
+
 // DashboardMetrics represents the metrics data structure for the web dashboard
 type DashboardMetrics struct {
 	Overview        OverviewMetrics           `json:"overview"`
 	TimeSeriesData  TimeSeriesData            `json:"time_series"`
 	TopClients      []ClientMetric            `json:"top_clients"`
-	QueryTypes      map[string]int64          `json:"query_types"`
+	QueryTypes      []QueryTypeMetric         `json:"query_types"` // Pre-sorted, top 8 query types
 	UpstreamServers map[string]*UpstreamStats `json:"upstream_servers"`
 	SystemInfo      SystemInfo                `json:"system_info"`
 }
@@ -89,7 +95,6 @@ type OverviewMetrics struct {
 	ActiveClients       int     `json:"active_clients"`
 }
 
-// TimeSeriesData holds time-based metrics for charts
 type TimeSeriesData struct {
 	RequestsLastHour  []TimePoint `json:"requests_last_hour"`
 	RequestsLastDay   []TimePoint `json:"requests_last_day"`
@@ -302,7 +307,7 @@ func (m *Metrics) GetDashboardMetrics(version string) DashboardMetrics {
 		},
 		TimeSeriesData:  timeSeriesData,
 		TopClients:      topClients,
-		QueryTypes:      m.queryTypeStats,
+		QueryTypes:      m.getTopQueryTypes(),
 		UpstreamServers: m.upstreamStats,
 		SystemInfo: SystemInfo{
 			Version:   version,
@@ -374,60 +379,96 @@ func (m *Metrics) cleanOldTimeData() {
 }
 
 func (m *Metrics) getTimeSeriesData() TimeSeriesData {
-	// Convert minute data to sorted slice (for last hour view)
-	minutePoints := make([]TimePoint, 0, len(m.requestsLastHour))
-	for timestamp, count := range m.requestsLastHour {
-		minutePoints = append(minutePoints, TimePoint{
-			Timestamp: timestamp * 1000, // Convert to milliseconds for JavaScript
-			Value:     count,
-		})
-	}
-	sort.Slice(minutePoints, func(i, j int) bool {
-		return minutePoints[i].Timestamp < minutePoints[j].Timestamp
-	})
+	now := time.Now()
 
-	// Convert hour data to sorted slice (for last day view)
-	hourPoints := make([]TimePoint, 0, len(m.requestsLastDay))
-	for timestamp, count := range m.requestsLastDay {
-		hourPoints = append(hourPoints, TimePoint{
-			Timestamp: timestamp * 1000, // Convert to milliseconds for JavaScript
-			Value:     count,
-		})
-	}
-	sort.Slice(hourPoints, func(i, j int) bool {
-		return hourPoints[i].Timestamp < hourPoints[j].Timestamp
-	})
-
-	// Convert day data to sorted slice (for last week view)
-	weekPoints := make([]TimePoint, 0, len(m.requestsLastWeek))
-	for timestamp, count := range m.requestsLastWeek {
-		weekPoints = append(weekPoints, TimePoint{
-			Timestamp: timestamp * 1000, // Convert to milliseconds for JavaScript
-			Value:     count,
-		})
-	}
-	sort.Slice(weekPoints, func(i, j int) bool {
-		return weekPoints[i].Timestamp < weekPoints[j].Timestamp
-	})
-
-	// Convert day data to sorted slice (for last month view)
-	monthPoints := make([]TimePoint, 0, len(m.requestsLastMonth))
-	for timestamp, count := range m.requestsLastMonth {
-		monthPoints = append(monthPoints, TimePoint{
-			Timestamp: timestamp * 1000, // Convert to milliseconds for JavaScript
-			Value:     count,
-		})
-	}
-	sort.Slice(monthPoints, func(i, j int) bool {
-		return monthPoints[i].Timestamp < monthPoints[j].Timestamp
-	})
+	minutePoints := m.generateTimeSlots(m.requestsLastHour, now, time.Minute, 75)
+	hourPoints := m.generateTimeSlots(m.requestsLastDay, now, time.Hour, 75)
+	dayPoints := m.generateTimeSlots(m.requestsLastWeek, now, 24*time.Hour, 75)
+	weekPoints := m.generateWeeklyTimeSlots(m.requestsLastMonth, now, 75)
 
 	return TimeSeriesData{
 		RequestsLastHour:  minutePoints,
 		RequestsLastDay:   hourPoints,
-		RequestsLastWeek:  weekPoints,
-		RequestsLastMonth: monthPoints,
+		RequestsLastWeek:  dayPoints,
+		RequestsLastMonth: weekPoints,
 	}
+}
+
+// generateTimeSlots creates exactly `count` time slots going backwards from now
+func (m *Metrics) generateTimeSlots(data map[int64]int64, now time.Time, duration time.Duration, count int) []TimePoint {
+	slots := make([]TimePoint, count)
+
+	for i := 0; i < count; i++ {
+		slotTime := now.Add(-time.Duration(count-1-i) * duration)
+
+		// Truncate to the appropriate unit
+		var truncatedTime time.Time
+		switch duration {
+		case time.Minute:
+			truncatedTime = slotTime.Truncate(time.Minute)
+		case time.Hour:
+			truncatedTime = slotTime.Truncate(time.Hour)
+		case 24 * time.Hour:
+			truncatedTime = slotTime.Truncate(24 * time.Hour)
+		default:
+			truncatedTime = slotTime.Truncate(duration)
+		}
+
+		timestamp := truncatedTime.Unix()
+		value := data[timestamp]
+
+		slots[i] = TimePoint{
+			Timestamp: timestamp * 1000, // Convert to milliseconds for JavaScript
+			Value:     value,
+		}
+	}
+
+	return slots
+}
+
+// generateWeeklyTimeSlots aggregates daily data into weekly buckets and returns exactly `count` week slots
+func (m *Metrics) generateWeeklyTimeSlots(dailyData map[int64]int64, now time.Time, count int) []TimePoint {
+	slots := make([]TimePoint, count)
+
+	for i := 0; i < count; i++ {
+		// Calculate the start of the week for this slot
+		weeksAgo := count - 1 - i
+		targetWeek := now.Add(-time.Duration(weeksAgo) * 7 * 24 * time.Hour)
+
+		// Get the Monday of that week (week starts on Monday)
+		weekStart := getWeekStart(targetWeek)
+
+		// Aggregate daily data for this week
+		var weekTotal int64
+		for dayOffset := 0; dayOffset < 7; dayOffset++ {
+			dayTime := weekStart.Add(time.Duration(dayOffset) * 24 * time.Hour)
+			dayTimestamp := dayTime.Truncate(24 * time.Hour).Unix()
+			weekTotal += dailyData[dayTimestamp]
+		}
+
+		slots[i] = TimePoint{
+			Timestamp: weekStart.Unix() * 1000, // Convert to milliseconds for JavaScript
+			Value:     weekTotal,
+		}
+	}
+
+	return slots
+}
+
+// getWeekStart returns the Monday (start of week) for the given date
+func getWeekStart(t time.Time) time.Time {
+	// Calculate days since Monday (Monday = 1, Sunday = 0)
+	weekday := int(t.Weekday())
+	if weekday == 0 {
+		weekday = 7 // Sunday becomes 7
+	}
+
+	// Go back to Monday
+	daysSinceMonday := weekday - 1
+	weekStart := t.Add(-time.Duration(daysSinceMonday) * 24 * time.Hour)
+
+	// Truncate to start of day
+	return time.Date(weekStart.Year(), weekStart.Month(), weekStart.Day(), 0, 0, 0, 0, weekStart.Location())
 }
 
 func (m *Metrics) getTopClients() []ClientMetric {
@@ -460,6 +501,29 @@ func (m *Metrics) getTopClients() []ClientMetric {
 	}
 
 	return clients
+}
+
+func (m *Metrics) getTopQueryTypes() []QueryTypeMetric {
+	queryTypes := make([]QueryTypeMetric, 0, len(m.queryTypeStats))
+
+	for qtype, count := range m.queryTypeStats {
+		queryTypes = append(queryTypes, QueryTypeMetric{
+			Type:  qtype,
+			Count: count,
+		})
+	}
+
+	// Sort by count (descending)
+	sort.Slice(queryTypes, func(i, j int) bool {
+		return queryTypes[i].Count > queryTypes[j].Count
+	})
+
+	// Return top 8 query types
+	if len(queryTypes) > 8 {
+		queryTypes = queryTypes[:8]
+	}
+
+	return queryTypes
 }
 
 func (m *Metrics) getRecentRequests() []types.LogEntry {

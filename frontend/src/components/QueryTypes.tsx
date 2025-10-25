@@ -1,11 +1,12 @@
 import React from 'react';
+import { QueryTypeMetric } from '../types';
 
 interface QueryTypesProps {
-  queryTypes: Record<string, number> | null | undefined;
+  queryTypes: QueryTypeMetric[] | null | undefined;
 }
 
 const QueryTypes: React.FC<QueryTypesProps> = ({ queryTypes }) => {
-  if (!queryTypes || Object.keys(queryTypes).length === 0) {
+  if (!queryTypes || queryTypes.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow-md p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Query Types</h3>
@@ -25,10 +26,6 @@ const QueryTypes: React.FC<QueryTypesProps> = ({ queryTypes }) => {
     return num.toString();
   };
 
-  const sortedTypes = Object.entries(queryTypes)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 8); // Show top 8 query types
-
   const colors: string[] = [
     'bg-blue-100 border-blue-300 text-blue-800',
     'bg-green-100 border-green-300 text-green-800',
@@ -44,15 +41,15 @@ const QueryTypes: React.FC<QueryTypesProps> = ({ queryTypes }) => {
     <div className="bg-white rounded-lg shadow-md p-6">
       <h3 className="text-lg font-semibold text-gray-900 mb-4">Query Types</h3>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {sortedTypes.map(([type, count], index) => (
+        {queryTypes.map((queryType, index) => (
           <div
-            key={type}
+            key={queryType.type}
             className={`p-4 rounded-lg border-2 text-center transition-transform hover:scale-105 ${
               colors[index % colors.length]
             }`}
           >
-            <div className="font-semibold text-sm mb-1">{type}</div>
-            <div className="text-xl font-bold">{formatNumber(count)}</div>
+            <div className="font-semibold text-sm mb-1">{queryType.type}</div>
+            <div className="text-xl font-bold">{formatNumber(queryType.count)}</div>
           </div>
         ))}
       </div>

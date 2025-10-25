@@ -83,11 +83,6 @@ const DNSMappings: React.FC = () => {
     setDeleteConfirmation({ show: false, domain: '' });
   };
 
-  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>): void => {
-    if (e.target === e.currentTarget) {
-      handleDeleteCancel();
-    }
-  };
 
   const updateMapping = async (oldDomain: string, newDomain: string, newIp: string): Promise<void> => {
     setLoading(true);
