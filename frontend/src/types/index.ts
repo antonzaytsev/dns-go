@@ -60,7 +60,7 @@ export interface OverviewMetrics {
   cache_hit_rate: number;
   success_rate: number;
   average_response_time_ms: number;
-  active_clients: number;
+  clients: number;
 }
 
 export interface QueryTypeMetric {

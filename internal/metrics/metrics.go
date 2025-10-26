@@ -92,7 +92,7 @@ type OverviewMetrics struct {
 	CacheHitRate        float64 `json:"cache_hit_rate"`
 	SuccessRate         float64 `json:"success_rate"`
 	AverageResponseTime float64 `json:"average_response_time_ms"`
-	ActiveClients       int     `json:"active_clients"`
+	Clients             int     `json:"clients"`
 }
 
 type TimeSeriesData struct {
@@ -303,7 +303,7 @@ func (m *Metrics) GetDashboardMetrics(version string) DashboardMetrics {
 			CacheHitRate:        cacheHitRate,
 			SuccessRate:         successRate,
 			AverageResponseTime: avgResponseTime,
-			ActiveClients:       activeClients,
+			Clients:             activeClients,
 		},
 		TimeSeriesData:  timeSeriesData,
 		TopClients:      topClients,

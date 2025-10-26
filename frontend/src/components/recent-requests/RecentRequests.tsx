@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { format } from 'date-fns';
 import { CheckCircle, XCircle, Database, Clock, ExternalLink, Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
-import { dnsApi } from '../services/api.ts';
-import type { DnsRequest, SearchResponse, RecentRequestsProps } from '../types';
+import { dnsApi } from '../../services/api.ts';
+import type { DnsRequest, SearchResponse, RecentRequestsProps } from '../../types';
 
 const RecentRequests: React.FC<RecentRequestsProps> = ({ requests, loading: initialLoading = false, fullHeight = false }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');

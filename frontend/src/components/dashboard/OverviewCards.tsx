@@ -1,6 +1,6 @@
 import React from 'react';
 import { Activity, Clock, Database, Users, Zap, TrendingUp, LucideIcon } from 'lucide-react';
-import { OverviewMetrics } from '../types';
+import { OverviewMetrics } from '../../types';
 
 type ColorType = 'blue' | 'green' | 'purple' | 'orange' | 'indigo' | 'pink';
 
@@ -117,8 +117,8 @@ const OverviewCards: React.FC<OverviewCardsProps> = ({ overview }) => {
       color: 'orange',
     },
     {
-      title: 'Active Clients',
-      value: formatNumber(overview.active_clients),
+      title: 'Clients',
+      value: formatNumber(overview.clients),
       subtitle: 'Connected',
       icon: Users,
       color: 'indigo',

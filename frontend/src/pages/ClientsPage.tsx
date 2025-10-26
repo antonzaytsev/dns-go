@@ -7,7 +7,7 @@ import Navigation from '../components/shared/Navigation.tsx';
 import ConnectionStatus from '../components/shared/ConnectionStatus.tsx';
 import type { Client } from '../types/index.ts';
 
-const ActiveClientsPage: React.FC = () => {
+const ClientsPage: React.FC = () => {
   const [clients, setClients] = useState<Client[]>([]);
   const [filteredClients, setFilteredClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -110,7 +110,7 @@ const ActiveClientsPage: React.FC = () => {
               <div className="flex items-center">
                 <Users className="h-8 w-8 text-indigo-600 mr-3" />
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900">Active Clients</h1>
+                  <h1 className="text-3xl font-bold text-gray-900">Clients</h1>
                   <p className="mt-2 text-gray-600">
                     {loading ? 'Loading...' : `${filteredClients.length} clients found`}
                   </p>
@@ -308,4 +308,4 @@ const ActiveClientsPage: React.FC = () => {
   );
 };
 
-export default ActiveClientsPage;
+export default ClientsPage;

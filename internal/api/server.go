@@ -145,7 +145,7 @@ func (s *Server) Start() error {
 	fmt.Printf("Time: %s\n", time.Now().Format("2006-01-02 15:04:05"))
 	fmt.Printf("\n📡 Available Endpoints:\n")
 	fmt.Printf("  🔍 GET /api/metrics      - DNS server metrics and statistics\n")
-	fmt.Printf("  👥 GET /api/clients      - Active DNS clients and statistics\n")
+	fmt.Printf("  👥 GET /api/clients      - DNS clients and statistics\n")
 	fmt.Printf("  🔎 GET /api/search       - Search through DNS logs\n")
 	fmt.Printf("  ❤️  GET /api/health       - Health check endpoint\n")
 	fmt.Printf("  ℹ️  GET /api/version      - Version and build information\n")

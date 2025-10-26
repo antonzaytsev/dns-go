@@ -49,8 +49,8 @@ const dashboardHTML = `<!DOCTYPE html>
             </div>
 
             <div class="card overview-card">
-                <h3>Active Clients</h3>
-                <div class="metric-value" id="activeClients">-</div>
+                <h3>Clients</h3>
+                <div class="metric-value" id="clients">-</div>
                 <div class="metric-subtitle">Last Hour</div>
             </div>
 
@@ -605,7 +605,7 @@ class DNSDashboard {
         const cacheHitRateEl = document.getElementById('cacheHitRate');
         const successRateEl = document.getElementById('successRate');
         const avgResponseTimeEl = document.getElementById('avgResponseTime');
-        const activeClientsEl = document.getElementById('activeClients');
+        const clientsEl = document.getElementById('clients');
         const uptimeEl = document.getElementById('uptime');
         
         if (totalRequestsEl) totalRequestsEl.textContent = this.formatNumber(overview.total_requests || 0);
@@ -613,7 +613,7 @@ class DNSDashboard {
         if (cacheHitRateEl) cacheHitRateEl.textContent = (overview.cache_hit_rate || 0).toFixed(1) + '%';
         if (successRateEl) successRateEl.textContent = (overview.success_rate || 0).toFixed(1) + '%';
         if (avgResponseTimeEl) avgResponseTimeEl.textContent = (overview.average_response_time_ms || 0).toFixed(1) + ' ms';
-        if (activeClientsEl) activeClientsEl.textContent = overview.active_clients || 0;
+        if (clientsEl) clientsEl.textContent = overview.clients || 0;
         if (uptimeEl) uptimeEl.textContent = overview.uptime || '-';
     }
 
