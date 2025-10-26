@@ -121,46 +121,40 @@ const RequestsPage: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
-          {/* Page title and search */}
-          <PageHeader
-            title="Requests"
-            subtitle={getSubtitle()}
-            searchValue={searchTerm}
-            onSearchChange={handleSearchChange}
-            onSearchSubmit={handleSearchSubmit}
-            searchPlaceholder="Search domain, IP, client..."
-            onClearSearch={clearSearch}
-          />
+        <PageHeader
+          title="Requests"
+          subtitle={getSubtitle()}
+          searchValue={searchTerm}
+          onSearchChange={handleSearchChange}
+          onSearchSubmit={handleSearchSubmit}
+          searchPlaceholder="Search domain, IP, client..."
+          onClearSearch={clearSearch}
+        />
 
-          {/* Error message */}
-          {(error || searchError) && (
-            <div className="mb-6 bg-red-50 border border-red-200 rounded-md p-4">
-              <div className="flex">
-                <AlertCircle className="h-5 w-5 text-red-400" />
-                <div className="ml-3">
-                  <h3 className="text-sm font-medium text-red-800">Error</h3>
-                  <div className="mt-2 text-sm text-red-700">{error || searchError}</div>
-                </div>
+        {(error || searchError) && (
+          <div className="mb-6 bg-red-50 border border-red-200 rounded-md p-4">
+            <div className="flex">
+              <AlertCircle className="h-5 w-5 text-red-400" />
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-red-800">Error</h3>
+                <div className="mt-2 text-sm text-red-700">{error || searchError}</div>
               </div>
             </div>
-          )}
-
-          {/* Requests table */}
-          <div className="h-full">
-            <RequestsFullHeight
-              requests={displayRequests}
-              loading={isLoading}
-              searchPerformed={searchPerformed}
-              currentPage={currentPage}
-              totalResults={totalResults}
-              pageSize={pageSize}
-              onPageChange={performSearch}
-              searchTerm={searchTerm}
-            />
           </div>
+        )}
+
+        <div className="h-full">
+          <RequestsFullHeight
+            requests={displayRequests}
+            loading={isLoading}
+            searchPerformed={searchPerformed}
+            currentPage={currentPage}
+            totalResults={totalResults}
+            pageSize={pageSize}
+            onPageChange={performSearch}
+            searchTerm={searchTerm}
+          />
         </div>
       </main>
     </div>

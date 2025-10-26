@@ -251,3 +251,11 @@ export interface DNSMappingsHeaderProps extends LoadingState {
   onAddMapping: VoidCallback;
   mappingsCount: number;
 }
+
+export interface DNSMappingsProps extends LoadingState, ErrorState {
+  mappings: DNSMappingsState;
+  onRefresh: VoidCallback;
+  onMappingsChange: (mappings: DNSMappingsState) => void;
+  showAddForm: boolean;
+  onShowAddFormChange: (show: boolean) => void;
+}
