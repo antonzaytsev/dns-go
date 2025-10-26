@@ -1,12 +1,12 @@
 import React from 'react';
 import { RefreshCw, AlertCircle } from 'lucide-react';
 import { useMetrics, useHealth } from '../hooks/useMetrics.ts';
-import OverviewCards from '../components/OverviewCards.tsx';
-import Charts from '../components/Charts.tsx';
-import QueryTypes from '../components/QueryTypes.tsx';
-import TopClients from '../components/TopClients.tsx';
-import ConnectionStatus from '../components/ConnectionStatus.tsx';
-import Navigation from '../components/Navigation.tsx';
+import OverviewCards from '../components/dashboard/OverviewCards.tsx';
+import Charts from '../components/dashboard/Charts.tsx';
+import QueryTypes from '../components/dashboard/QueryTypes.tsx';
+import TopClients from '../components/dashboard/TopClients.tsx';
+import ConnectionStatus from '../components/shared/ConnectionStatus.tsx';
+import Navigation from '../components/shared/Navigation.tsx';
 
 const DashboardPage: React.FC = () => {
   const { metrics, loading, error, lastUpdated, refresh } = useMetrics(5000);

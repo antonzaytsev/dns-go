@@ -3,8 +3,8 @@ import { RefreshCw, Users, Search, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { dnsApi } from '../services/api.ts';
 import { useHealth } from '../hooks/useMetrics.ts';
-import Navigation from '../components/Navigation.tsx';
-import ConnectionStatus from '../components/ConnectionStatus.tsx';
+import Navigation from '../components/shared/Navigation.tsx';
+import ConnectionStatus from '../components/shared/ConnectionStatus.tsx';
 import type { Client } from '../types/index.ts';
 
 const ActiveClientsPage: React.FC = () => {

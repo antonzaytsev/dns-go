@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { dnsApi } from '../../services/api.ts';
 import DNSMappingsHeader from './DNSMappingsHeader.tsx';
-import StatusMessages from '../StatusMessages.tsx';
+import StatusMessages from './StatusMessages.tsx';
 import AddMappingForm from './AddMappingForm.tsx';
 import DNSMappingsList from './DNSMappingsList.tsx';
 import DeleteConfirmationModal from './DeleteConfirmationModal.tsx';
