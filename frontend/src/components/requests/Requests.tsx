@@ -1,81 +1,35 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { format } from 'date-fns';
-import { CheckCircle, XCircle, Database, Clock, ExternalLink, Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
-import { dnsApi } from '../../services/api.ts';
-import type { DnsRequest, SearchResponse, RequestsProps } from '../../types';
+import { CheckCircle, XCircle, Database, Clock, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react';
+import type { DnsRequest, RequestsProps } from '../../types';
 
-const Requests: React.FC<RequestsProps> = ({ requests, loading: initialLoading = false, fullHeight = false }) => {
-  const [searchTerm, setSearchTerm] = useState<string>('');
-  const [searchResults, setSearchResults] = useState<DnsRequest[]>([]);
-  const [searchLoading, setSearchLoading] = useState<boolean>(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState<number>(0);
-  const [totalResults, setTotalResults] = useState<number>(0);
-  const [searchPerformed, setSearchPerformed] = useState<boolean>(false);
-
-  const pageSize: number = 50;
-
-  // Perform search
-  const performSearch = async (term: string = searchTerm, page: number = 0): Promise<void> => {
-    setSearchLoading(true);
-    setSearchError(null);
-
-    try {
-      const result: SearchResponse = await dnsApi.searchLogs(term, pageSize, page * pageSize);
-      setSearchResults(result.results || []);
-      setTotalResults(result.total || 0);
-      setCurrentPage(page);
-      setSearchPerformed(true);
-    } catch (error) {
-      // Handle specific error cases
-      if (error.message && error.message.includes('503')) {
-        setSearchError('Search service unavailable. Please check if Elasticsearch is running.');
-      } else if (error.message && error.message.includes('500')) {
-        setSearchError('Search failed due to database error. Please try again.');
-      } else {
-        setSearchError('Failed to search logs. Please check your connection.');
-      }
-      setSearchResults([]);
-      setTotalResults(0);
-    } finally {
-      setSearchLoading(false);
-    }
-  };
-
-  // Handle search input
-  const handleSearch = (e) => {
-    e.preventDefault();
-    setCurrentPage(0);
-    performSearch(searchTerm, 0);
-  };
-
-  // Clear search
-  const clearSearch = (): void => {
-    setSearchTerm('');
-    setSearchResults([]);
-    setSearchPerformed(false);
-    setCurrentPage(0);
-    setTotalResults(0);
-    setSearchError(null);
-  };
+const Requests: React.FC<RequestsProps> = ({ 
+  requests, 
+  loading = false, 
+  fullHeight = false,
+  searchPerformed = false,
+  currentPage = 0,
+  totalResults = 0,
+  pageSize = 50,
+  onPageChange,
+  searchTerm = ''
+}) => {
 
   // Pagination handlers
   const nextPage = (): void => {
-    if ((currentPage + 1) * pageSize < totalResults) {
-      performSearch(searchTerm, currentPage + 1);
+    if (onPageChange && (currentPage + 1) * pageSize < totalResults) {
+      onPageChange(searchTerm, currentPage + 1);
     }
   };
 
   const prevPage = (): void => {
-    if (currentPage > 0) {
-      performSearch(searchTerm, currentPage - 1);
+    if (onPageChange && currentPage > 0) {
+      onPageChange(searchTerm, currentPage - 1);
     }
   };
 
-  const displayRequests = searchPerformed ? searchResults : (requests || []);
+  const displayRequests = requests || [];
   const showPagination = searchPerformed && totalResults > pageSize;
-  const isShowingSearchResults = searchPerformed;
-  const isLoading = searchLoading || (!searchPerformed && initialLoading);
 
   const getStatusIcon = (status: string): JSX.Element => {
     switch (status) {
@@ -124,85 +78,39 @@ const Requests: React.FC<RequestsProps> = ({ requests, loading: initialLoading =
   };
 
   return (
-    <div className={`bg-white rounded-lg shadow-md p-6 ${fullHeight ? 'h-full flex flex-col' : ''}`}>
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center space-x-4">
-          <h3 className="text-lg font-semibold text-gray-900">
-            {isShowingSearchResults ? 'DNS Logs Search' : 'Requests'}
-          </h3>
-        </div>
-        {searchPerformed && (
-          <div className="flex items-center space-x-4">
-            <div className="text-sm text-gray-600">
-              <span className="ml-2">
-                {totalResults.toLocaleString()} total result{totalResults !== 1 ? 's' : ''}
-              </span>
-            </div>
+    <div className={`bg-white rounded-lg shadow-md ${fullHeight ? 'h-full flex flex-col' : ''}`}>
+      {showPagination && (
+        <div className="flex items-center justify-between p-4 border-b border-gray-200">
+          <div className="text-sm text-gray-600">
+            {totalResults.toLocaleString()} total result{totalResults !== 1 ? 's' : ''}
           </div>
-        )}
-        <div className="flex items-center space-x-4">
-          {showPagination && (
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={prevPage}
-                disabled={currentPage === 0}
-                className="p-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <span className="text-xs">
-                Page {currentPage + 1} of {Math.ceil(totalResults / pageSize)}
-              </span>
-              <button
-                onClick={nextPage}
-                disabled={(currentPage + 1) * pageSize >= totalResults}
-                className="p-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          )}
-          <form onSubmit={handleSearch} className="flex items-center space-x-2">
-            <div className="relative">
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search domain, IP, client..."
-                className="w-64 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              />
-              {searchTerm && (
-                <button
-                  type="button"
-                  onClick={clearSearch}
-                  className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
+          <div className="flex items-center space-x-2">
             <button
-              type="submit"
-              disabled={searchLoading}
-              className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+              onClick={prevPage}
+              disabled={currentPage === 0}
+              className="p-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Search className="h-4 w-4" />
+              <ChevronLeft className="h-4 w-4" />
             </button>
-          </form>
-        </div>
-      </div>
-
-      {searchError && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
-          <p className="text-sm text-red-600">{searchError}</p>
+            <span className="text-xs">
+              Page {currentPage + 1} of {Math.ceil(totalResults / pageSize)}
+            </span>
+            <button
+              onClick={nextPage}
+              disabled={(currentPage + 1) * pageSize >= totalResults}
+              className="p-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       )}
 
-      {isLoading && (
+      {loading && (
         <div className="text-center py-8">
           <div className="inline-flex items-center text-gray-600">
             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600 mr-2"></div>
-            {searchLoading ? 'Searching...' : 'Loading requests...'}
+            Loading requests...
           </div>
         </div>
       )}
@@ -238,7 +146,7 @@ const Requests: React.FC<RequestsProps> = ({ requests, loading: initialLoading =
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {!isLoading && displayRequests && displayRequests.length > 0 ? displayRequests.map((request, index) => (
+              {!loading && displayRequests && displayRequests.length > 0 ? displayRequests.map((request, index) => (
                 <tr
                   key={request.uuid || index}
                   className="hover:bg-gray-50 transition-colors"
@@ -334,7 +242,7 @@ const Requests: React.FC<RequestsProps> = ({ requests, loading: initialLoading =
                     )}
                   </td>
                 </tr>
-              )) : !isLoading ? (
+              )) : !loading ? (
                 <tr>
                   <td colSpan="8" className="px-4 py-8 text-center text-gray-500">
                     {searchPerformed ? (
@@ -355,32 +263,8 @@ const Requests: React.FC<RequestsProps> = ({ requests, loading: initialLoading =
       </div>
 
       {!searchPerformed && requests && requests.length > 50 && (
-        <div className="mt-4 text-center text-sm text-gray-500">
+        <div className="p-4 text-center text-sm text-gray-500 border-t border-gray-200">
           Showing latest 50 of {requests.length} requests
-        </div>
-      )}
-
-      {showPagination && (
-        <div className="mt-4 flex items-center justify-center space-x-4">
-          <button
-            onClick={prevPage}
-            disabled={currentPage === 0}
-            className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <ChevronLeft className="h-4 w-4 mr-1" />
-            Previous
-          </button>
-          <span className="text-sm text-gray-700">
-            Page {currentPage + 1} of {Math.ceil(totalResults / pageSize)}
-          </span>
-          <button
-            onClick={nextPage}
-            disabled={(currentPage + 1) * pageSize >= totalResults}
-            className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Next
-            <ChevronRight className="h-4 w-4 ml-1" />
-          </button>
         </div>
       )}
     </div>

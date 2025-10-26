@@ -135,10 +135,22 @@ export interface StatusMessagesProps extends MessageState {}
 export interface RequestsProps extends Partial<LoadingState> {
   requests: DnsRequest[];
   fullHeight?: boolean;
+  searchPerformed?: boolean;
+  currentPage?: number;
+  totalResults?: number;
+  pageSize?: number;
+  onPageChange?: (term: string, page: number) => Promise<void>;
+  searchTerm?: string;
 }
 
 export interface RequestsFullHeightProps extends LoadingState {
   requests: DnsRequest[];
+  searchPerformed?: boolean;
+  currentPage?: number;
+  totalResults?: number;
+  pageSize?: number;
+  onPageChange?: (term: string, page: number) => Promise<void>;
+  searchTerm?: string;
 }
 
 // ===== HOOK RETURN TYPES =====

@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Search, X } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
 import { dnsApi } from '../services/api.ts';
 import { useHealth } from '../hooks/useMetrics.ts';
 import Navigation from '../components/shared/Navigation.tsx';
 import ConnectionStatus from '../components/shared/ConnectionStatus.tsx';
+import PageHeader from '../components/shared/PageHeader.tsx';
 import type { Client } from '../types/index.ts';
 
 const ClientsPage: React.FC = () => {
@@ -60,6 +61,14 @@ const ClientsPage: React.FC = () => {
     setSearchTerm('');
   };
 
+  const handleSearchChange = (value: string) => {
+    setSearchTerm(value);
+  };
+
+  const getSubtitle = (): string => {
+    return loading ? 'Loading...' : `${filteredClients.length} clients found`;
+  };
+
   // Pagination logic
   const totalPages = Math.ceil(filteredClients.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -105,42 +114,14 @@ const ClientsPage: React.FC = () => {
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="px-4 py-6 sm:px-0">
           {/* Page title and search */}
-          <div className="mb-8">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <div>
-                  <h1 className="text-3xl font-bold text-gray-900">Clients</h1>
-                  <p className="mt-2 text-gray-600">
-                    {loading ? 'Loading...' : `${filteredClients.length} clients found`}
-                  </p>
-                </div>
-              </div>
-              
-              {/* Search */}
-              <div className="relative max-w-md w-full">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Search className="h-5 w-5 text-gray-400" />
-                </div>
-                <input
-                  type="text"
-                  placeholder="Search by IP address..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-                />
-                {searchTerm && (
-                  <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
-                    <button
-                      onClick={clearSearch}
-                      className="text-gray-400 hover:text-gray-600"
-                    >
-                      <X className="h-5 w-5" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          <PageHeader
+            title="Clients"
+            subtitle={getSubtitle()}
+            searchValue={searchTerm}
+            onSearchChange={handleSearchChange}
+            searchPlaceholder="Search by IP address..."
+            onClearSearch={clearSearch}
+          />
 
           {/* Error message */}
           {error && (
