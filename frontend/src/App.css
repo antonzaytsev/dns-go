@@ -6,7 +6,7 @@
   text-align: left;
 }
 
-/* Custom scrollbar for recent requests */
+/* Custom scrollbar for requests */
 .max-h-96::-webkit-scrollbar {
   width: 6px;
 }

@@ -64,7 +64,7 @@ The DNS server includes a modern web dashboard for real-time monitoring and anal
 - **📈 Interactive Charts**: Request patterns over time
 - **👥 Client Analytics**: Top clients and request patterns
 - **🌐 Upstream Monitoring**: Server health and performance
-- **📝 Recent Requests**: Live request feed with details
+- **📝 Requests**: Live request feed with details
 - **🎨 Modern UI**: Responsive design with dark mode support
 
 ### Access
@@ -78,7 +78,7 @@ The DNS server includes a modern web dashboard for real-time monitoring and anal
 3. **Query Types**: Distribution of DNS query types (A, AAAA, MX, etc.)
 4. **Top Clients**: Most active clients with success rates
 5. **Upstream Servers**: Health status and performance metrics
-6. **Recent Requests**: Live feed of DNS queries with details
+6. **Requests**: Live feed of DNS queries with details
 
 ### Configuration
 ```bash

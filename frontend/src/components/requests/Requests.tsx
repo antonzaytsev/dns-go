@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { format } from 'date-fns';
 import { CheckCircle, XCircle, Database, Clock, ExternalLink, Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { dnsApi } from '../../services/api.ts';
-import type { DnsRequest, SearchResponse, RecentRequestsProps } from '../../types';
+import type { DnsRequest, SearchResponse, RequestsProps } from '../../types';
 
-const RecentRequests: React.FC<RecentRequestsProps> = ({ requests, loading: initialLoading = false, fullHeight = false }) => {
+const Requests: React.FC<RequestsProps> = ({ requests, loading: initialLoading = false, fullHeight = false }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [searchResults, setSearchResults] = useState<DnsRequest[]>([]);
   const [searchLoading, setSearchLoading] = useState<boolean>(false);
@@ -128,7 +128,7 @@ const RecentRequests: React.FC<RecentRequestsProps> = ({ requests, loading: init
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-4">
           <h3 className="text-lg font-semibold text-gray-900">
-            {isShowingSearchResults ? 'DNS Logs Search' : 'Recent Requests'}
+            {isShowingSearchResults ? 'DNS Logs Search' : 'Requests'}
           </h3>
         </div>
         {searchPerformed && (
@@ -202,7 +202,7 @@ const RecentRequests: React.FC<RecentRequestsProps> = ({ requests, loading: init
         <div className="text-center py-8">
           <div className="inline-flex items-center text-gray-600">
             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600 mr-2"></div>
-            {searchLoading ? 'Searching...' : 'Loading recent requests...'}
+            {searchLoading ? 'Searching...' : 'Loading requests...'}
           </div>
         </div>
       )}
@@ -344,7 +344,7 @@ const RecentRequests: React.FC<RecentRequestsProps> = ({ requests, loading: init
                         'No DNS logs found'
                       )
                     ) : (
-                      'No recent requests'
+                      'No requests'
                     )}
                   </td>
                 </tr>
@@ -387,4 +387,4 @@ const RecentRequests: React.FC<RecentRequestsProps> = ({ requests, loading: init
   );
 };
 
-export default RecentRequests;
+export default Requests;

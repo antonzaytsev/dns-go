@@ -77,7 +77,7 @@ export interface Metrics {
   avg_response_time?: number;
   clients?: Client[];
   query_types?: QueryTypeMetric[]; // Pre-sorted, top 8 query types
-  recent_requests?: DnsRequest[];
+  requests?: DnsRequest[];
   uptime?: string;
   version?: string;
 }
@@ -132,12 +132,12 @@ export interface TopClientsProps {
 
 export interface StatusMessagesProps extends MessageState {}
 
-export interface RecentRequestsProps extends Partial<LoadingState> {
+export interface RequestsProps extends Partial<LoadingState> {
   requests: DnsRequest[];
   fullHeight?: boolean;
 }
 
-export interface RecentRequestsFullHeightProps extends LoadingState {
+export interface RequestsFullHeightProps extends LoadingState {
   requests: DnsRequest[];
 }
 
@@ -157,8 +157,8 @@ export interface UseHealthReturn extends LoadingState, ErrorState {
   isHealthy: boolean;
 }
 
-export interface UseRecentRequestsReturn extends BaseHookReturn {
-  recentRequests: DnsRequest[];
+export interface UseRequestsReturn extends BaseHookReturn {
+  requests: DnsRequest[];
 }
 
 // ===== TIME SERIES & CHARTS =====

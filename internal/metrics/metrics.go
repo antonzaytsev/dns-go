@@ -43,9 +43,9 @@ type Metrics struct {
 	responseTimeSum   float64
 	responseTimeCount int64
 
-	// Recent requests for real-time display
-	recentRequests []types.LogEntry
-	maxRecentSize  int
+	// Requests for real-time display
+	requests      []types.LogEntry
+	maxRecentSize int
 }
 
 // ClientStats holds statistics for a specific client
@@ -81,6 +81,7 @@ type DashboardMetrics struct {
 	TopClients      []ClientMetric            `json:"top_clients"`
 	QueryTypes      []QueryTypeMetric         `json:"query_types"` // Pre-sorted, top 8 query types
 	UpstreamServers map[string]*UpstreamStats `json:"upstream_servers"`
+	Requests        []types.LogEntry          `json:"requests"` // Requests for real-time display
 	SystemInfo      SystemInfo                `json:"system_info"`
 }
 
@@ -134,7 +135,7 @@ func NewMetrics() *Metrics {
 		clientStats:       make(map[string]*ClientStats),
 		queryTypeStats:    make(map[string]int64),
 		upstreamStats:     make(map[string]*UpstreamStats),
-		recentRequests:    make([]types.LogEntry, 0),
+		requests:          make([]types.LogEntry, 0),
 		maxRecentSize:     100, // Keep last 100 requests
 	}
 }
@@ -232,10 +233,10 @@ func (m *Metrics) RecordRequest(entry types.LogEntry) {
 		m.malformedQueries++
 	}
 
-	// Add to recent requests
-	m.recentRequests = append(m.recentRequests, entry)
-	if len(m.recentRequests) > m.maxRecentSize {
-		m.recentRequests = m.recentRequests[1:]
+	// Add to requests
+	m.requests = append(m.requests, entry)
+	if len(m.requests) > m.maxRecentSize {
+		m.requests = m.requests[1:]
 	}
 }
 
@@ -309,6 +310,7 @@ func (m *Metrics) GetDashboardMetrics(version string) DashboardMetrics {
 		TopClients:      topClients,
 		QueryTypes:      m.getTopQueryTypes(),
 		UpstreamServers: m.upstreamStats,
+		Requests:        m.getRequests(),
 		SystemInfo: SystemInfo{
 			Version:   version,
 			StartTime: m.startTime.Format(time.RFC3339),
@@ -556,11 +558,11 @@ func (m *Metrics) getTopQueryTypes() []QueryTypeMetric {
 	return queryTypes
 }
 
-func (m *Metrics) getRecentRequests() []types.LogEntry {
-	// Return a copy of recent requests (reversed to show newest first)
-	recent := make([]types.LogEntry, len(m.recentRequests))
-	for i, j := 0, len(m.recentRequests)-1; i <= j; i, j = i+1, j-1 {
-		recent[i], recent[j] = m.recentRequests[j], m.recentRequests[i]
+func (m *Metrics) getRequests() []types.LogEntry {
+	// Return a copy of requests (reversed to show newest first)
+	recent := make([]types.LogEntry, len(m.requests))
+	for i, j := 0, len(m.requests)-1; i <= j; i, j = i+1, j-1 {
+		recent[i], recent[j] = m.requests[j], m.requests[i]
 	}
 	return recent
 }

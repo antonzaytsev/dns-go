@@ -95,10 +95,10 @@ const dashboardHTML = `<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Recent Requests -->
-            <div class="card recent-requests-card">
-                <h3>Recent Requests</h3>
-                <div class="recent-requests" id="recentRequests">
+            <!-- Requests -->
+            <div class="card requests-card">
+                <h3>Requests</h3>
+                <div class="requests" id="requests">
                     <div class="loading">Loading...</div>
                 </div>
             </div>
@@ -225,7 +225,7 @@ body {
     min-height: 300px;
 }
 
-.recent-requests-card {
+.requests-card {
     grid-column: span 3;
 }
 
@@ -317,7 +317,7 @@ body {
     color: #666;
 }
 
-.recent-requests {
+.requests {
     max-height: 400px;
     overflow-y: auto;
 }
@@ -416,7 +416,7 @@ body {
     }
     
     .chart-card,
-    .recent-requests-card {
+    .requests-card {
         grid-column: span 1;
     }
     
@@ -593,7 +593,7 @@ class DNSDashboard {
         this.updateQueryTypes(data.query_types);
         this.updateTopClients(data.top_clients);
         this.updateUpstreamServers(data.upstream_servers);
-        this.updateRecentRequests(data.recent_requests);
+        this.updateRequests(data.requests);
         this.updateLastUpdated();
     }
 
@@ -720,11 +720,11 @@ class DNSDashboard {
         container.innerHTML = html;
     }
 
-    updateRecentRequests(requests) {
-        const container = document.getElementById('recentRequests');
+    updateRequests(requests) {
+        const container = document.getElementById('requests');
         
         if (!requests || requests.length === 0) {
-            container.innerHTML = '<div class="loading">No recent requests</div>';
+            container.innerHTML = '<div class="loading">No requests</div>';
             return;
         }
 
@@ -808,7 +808,7 @@ class DNSDashboard {
     }
 
     showError(message) {
-        const containers = ['queryTypes', 'topClients', 'upstreamServers', 'recentRequests'];
+        const containers = ['queryTypes', 'topClients', 'upstreamServers', 'requests'];
         containers.forEach(id => {
             const element = document.getElementById(id);
             if (element) {

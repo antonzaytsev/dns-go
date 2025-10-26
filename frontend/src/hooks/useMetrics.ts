@@ -7,7 +7,7 @@ import type {
   SearchResponse, 
   UseMetricsReturn,
   UseHealthReturn,
-  UseRecentRequestsReturn 
+  UseRequestsReturn 
 } from '../types/index.ts';
 
 export const useMetrics = (refreshInterval: number = 5000): UseMetricsReturn => {
@@ -86,45 +86,45 @@ export const useHealth = (refreshInterval: number = 30000): UseHealthReturn => {
   };
 };
 
-export const useRecentRequests = (refreshInterval: number = 5000): UseRecentRequestsReturn => {
-  const [recentRequests, setRecentRequests] = useState<DnsRequest[]>([]);
+export const useRequests = (refreshInterval: number = 5000): UseRequestsReturn => {
+  const [requests, setRequests] = useState<DnsRequest[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  const fetchRecentRequests = useCallback(async (): Promise<void> => {
+  const fetchRequests = useCallback(async (): Promise<void> => {
     try {
       setError(null);
       // Load last 50 requests using empty search query
       const data: SearchResponse = await dnsApi.searchLogs('', 50, 0);
-      setRecentRequests(data.results || []);
+      setRequests(data.results || []);
       setLastUpdated(new Date());
       setLoading(false);
     } catch (err: any) {
-      setError(err.message || 'Failed to fetch recent requests');
+      setError(err.message || 'Failed to fetch requests');
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     // Initial fetch
-    fetchRecentRequests();
+    fetchRequests();
 
     // Set up interval for periodic updates
-    const interval: NodeJS.Timeout = setInterval(fetchRecentRequests, refreshInterval);
+    const interval: NodeJS.Timeout = setInterval(fetchRequests, refreshInterval);
 
     // Cleanup interval on unmount
     return () => clearInterval(interval);
-  }, [fetchRecentRequests, refreshInterval]);
+  }, [fetchRequests, refreshInterval]);
 
   // Manual refresh function
   const refresh = useCallback((): void => {
     setLoading(true);
-    fetchRecentRequests();
-  }, [fetchRecentRequests]);
+    fetchRequests();
+  }, [fetchRequests]);
 
   return {
-    recentRequests,
+    requests,
     loading,
     error,
     lastUpdated,

@@ -1,12 +1,12 @@
 import React from 'react';
 import { AlertCircle } from 'lucide-react';
-import { useRecentRequests } from '../hooks/useMetrics.ts';
-import RecentRequests from '../components/recent-requests/RecentRequests.tsx';
+import { useRequests } from '../hooks/useMetrics.ts';
+import Requests from '../components/requests/Requests.tsx';
 import Navigation from '../components/shared/Navigation.tsx';
-import type { RecentRequestsFullHeightProps } from '../types/index.ts';
+import type { RequestsFullHeightProps } from '../types/index.ts';
 
-const RecentRequestsPage: React.FC = () => {
-  const { recentRequests, loading, error } = useRecentRequests(5000);
+const RequestsPage: React.FC = () => {
+  const { requests, loading, error } = useRequests(5000);
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -33,7 +33,7 @@ const RecentRequestsPage: React.FC = () => {
                 <AlertCircle className="h-5 w-5 text-red-400" />
                 <div className="ml-3">
                   <h3 className="text-sm font-medium text-red-800">
-                    Error loading recent requests
+                    Error loading requests
                   </h3>
                   <div className="mt-2 text-sm text-red-700">
                     {error}
@@ -43,7 +43,7 @@ const RecentRequestsPage: React.FC = () => {
             </div>
           )}
           <div className="h-full">
-            <RecentRequestsFullHeight requests={recentRequests} loading={loading} />
+            <RequestsFullHeight requests={requests} loading={loading} />
           </div>
         </div>
       </main>
@@ -51,13 +51,13 @@ const RecentRequestsPage: React.FC = () => {
   );
 };
 
-// Create a full-height version that wraps the existing RecentRequests
-const RecentRequestsFullHeight: React.FC<RecentRequestsFullHeightProps> = ({ requests, loading }) => {
+// Create a full-height version that wraps the existing Requests
+const RequestsFullHeight: React.FC<RequestsFullHeightProps> = ({ requests, loading }) => {
   return (
     <div className="h-full">
-      <RecentRequests requests={requests} loading={loading} fullHeight={true} />
+      <Requests requests={requests} loading={loading} fullHeight={true} />
     </div>
   );
 };
 
-export default RecentRequestsPage;
+export default RequestsPage;

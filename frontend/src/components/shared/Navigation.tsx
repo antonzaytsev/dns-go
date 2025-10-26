@@ -31,14 +31,14 @@ const Navigation: React.FC = () => {
         DNS Mappings
       </Link>
       <Link
-        to="/recent-requests"
+        to="/requests"
         className={`inline-flex items-center px-1 pt-1 text-sm font-medium ${
-          isActive('/recent-requests')
+          isActive('/requests')
             ? 'text-gray-900 border-b-2 border-indigo-500'
             : 'text-gray-500 hover:text-gray-700 hover:border-gray-300 border-b-2 border-transparent'
         }`}
       >
-        Recent Requests
+        Requests
       </Link>
       <Link
         to="/clients"
