@@ -112,6 +112,11 @@ export interface DNSMappingsResponse {
   mappings: Record<string, string>;
 }
 
+export interface ClientsResponse {
+  clients: Client[];
+  total: number;
+}
+
 export interface APIResponse<T = any> {
   data: T;
   message?: string;

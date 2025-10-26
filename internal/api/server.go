@@ -117,6 +117,7 @@ func NewServer(cfg Config) (*Server, error) {
 
 	// API endpoints
 	mux.HandleFunc("/api/metrics", s.handleMetrics)
+	mux.HandleFunc("/api/clients", s.handleClients)
 	mux.HandleFunc("/api/search", s.handleSearch)
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/version", s.handleVersion)
@@ -144,6 +145,7 @@ func (s *Server) Start() error {
 	fmt.Printf("Time: %s\n", time.Now().Format("2006-01-02 15:04:05"))
 	fmt.Printf("\n📡 Available Endpoints:\n")
 	fmt.Printf("  🔍 GET /api/metrics      - DNS server metrics and statistics\n")
+	fmt.Printf("  👥 GET /api/clients      - Active DNS clients and statistics\n")
 	fmt.Printf("  🔎 GET /api/search       - Search through DNS logs\n")
 	fmt.Printf("  ❤️  GET /api/health       - Health check endpoint\n")
 	fmt.Printf("  ℹ️  GET /api/version      - Version and build information\n")
@@ -198,6 +200,27 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewEncoder(w).Encode(dashboardMetrics); err != nil {
 		http.Error(w, "Failed to encode metrics", http.StatusInternalServerError)
+		return
+	}
+}
+
+func (s *Server) handleClients(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	clients := s.metrics.GetAllClients()
+
+	response := map[string]interface{}{
+		"clients": clients,
+		"total":   len(clients),
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode clients", http.StatusInternalServerError)
 		return
 	}
 }

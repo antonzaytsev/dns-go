@@ -503,6 +503,36 @@ func (m *Metrics) getTopClients() []ClientMetric {
 	return clients
 }
 
+func (m *Metrics) GetAllClients() []ClientMetric {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	clients := make([]ClientMetric, 0, len(m.clientStats))
+
+	for ip, stats := range m.clientStats {
+		var cacheHitRate, successRate float64
+		if stats.TotalRequests > 0 {
+			cacheHitRate = float64(stats.CacheHits) / float64(stats.TotalRequests) * 100
+			successRate = float64(stats.SuccessfulQueries+stats.CacheHits) / float64(stats.TotalRequests) * 100
+		}
+
+		clients = append(clients, ClientMetric{
+			IP:           ip,
+			Requests:     stats.TotalRequests,
+			CacheHitRate: cacheHitRate,
+			SuccessRate:  successRate,
+			LastSeen:     stats.LastSeen,
+		})
+	}
+
+	// Sort by request count (descending)
+	sort.Slice(clients, func(i, j int) bool {
+		return clients[i].Requests > clients[j].Requests
+	})
+
+	return clients
+}
+
 func (m *Metrics) getTopQueryTypes() []QueryTypeMetric {
 	queryTypes := make([]QueryTypeMetric, 0, len(m.queryTypeStats))
 

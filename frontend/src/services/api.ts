@@ -5,6 +5,7 @@ import type {
   VersionInfo,
   SearchResponse,
   DNSMappingsResponse,
+  ClientsResponse,
   APIResponse,
 } from '../types';
 
@@ -50,6 +51,17 @@ export const dnsApi = {
       return response.data;
     } catch (error) {
       console.error('Failed to fetch metrics:', error);
+      throw error;
+    }
+  },
+
+  // Get all DNS clients
+  getClients: async (): Promise<ClientsResponse> => {
+    try {
+      const response: AxiosResponse<ClientsResponse> = await api.get('/api/clients');
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch clients:', error);
       throw error;
     }
   },
