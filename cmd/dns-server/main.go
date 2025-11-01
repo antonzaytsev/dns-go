@@ -17,6 +17,7 @@ import (
 	"dns-go/internal/cache"
 	"dns-go/internal/config"
 	"dns-go/internal/logging"
+	"dns-go/internal/postgres"
 	"dns-go/internal/resolver"
 	"dns-go/internal/types"
 	"dns-go/internal/upstream"
@@ -499,6 +500,37 @@ func run() error {
 		"version": versionInfo.String(),
 		"config":  startupConfig,
 	})
+
+	// Record DNS server start time in PostgreSQL if available
+	serverStartTime := time.Now()
+	pgHost := os.Getenv("POSTGRES_HOST")
+	pgPort := os.Getenv("POSTGRES_PORT")
+	pgDB := os.Getenv("POSTGRES_DB")
+	pgUser := os.Getenv("POSTGRES_USER")
+	pgPassword := os.Getenv("POSTGRES_PASSWORD")
+
+	if pgHost != "" || pgPort != "" || pgDB != "" {
+		pgConfig := postgres.Config{
+			Host:     pgHost,
+			Port:     pgPort,
+			Database: pgDB,
+			User:     pgUser,
+			Password: pgPassword,
+		}
+
+		if pgClient, err := postgres.NewClient(pgConfig); err == nil {
+			defer pgClient.Close()
+			if err := pgClient.SetDNSServerStartTime(serverStartTime); err != nil {
+				logger.Warn("Failed to record DNS server start time", map[string]interface{}{
+					"error": err.Error(),
+				})
+			} else {
+				logger.Info("DNS server start time recorded", map[string]interface{}{
+					"start_time": serverStartTime.Format(time.RFC3339),
+				})
+			}
+		}
+	}
 
 	// Start server
 	if err := server.Start(ctx); err != nil && err != context.Canceled {

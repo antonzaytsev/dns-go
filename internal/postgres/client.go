@@ -1087,3 +1087,88 @@ func (c *Client) GetCachedAggregatedStats() (*AggregatedStatsData, error) {
 
 	return &statsData, nil
 }
+
+// GetEarliestLogTimestamp returns the earliest timestamp from DNS logs
+// This can be used to approximate when the DNS server started
+func (c *Client) GetEarliestLogTimestamp() (*time.Time, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var earliestTimestamp sql.NullTime
+	if err := c.db.WithContext(ctx).Raw(`
+		SELECT MIN(timestamp) as earliest_timestamp
+		FROM dns_logs
+	`).Scan(&earliestTimestamp).Error; err != nil {
+		return nil, fmt.Errorf("failed to get earliest log timestamp: %w", err)
+	}
+
+	if !earliestTimestamp.Valid {
+		// No logs found, return nil to indicate no start time available
+		return nil, nil
+	}
+
+	return &earliestTimestamp.Time, nil
+}
+
+const (
+	// MetadataKeyDNSServerStartTime is the key for storing DNS server start time
+	MetadataKeyDNSServerStartTime = "dns_server_start_time"
+)
+
+// SetDNSServerStartTime records the DNS server start time in the system metadata table
+func (c *Client) SetDNSServerStartTime(startTime time.Time) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result := c.db.WithContext(ctx).Exec(`
+		INSERT INTO system_metadata (metadata_key, metadata_value, updated_at, created_at)
+		VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		ON CONFLICT (metadata_key) 
+		DO UPDATE SET 
+			metadata_value = EXCLUDED.metadata_value,
+			updated_at = CURRENT_TIMESTAMP
+	`, MetadataKeyDNSServerStartTime, startTime.Format(time.RFC3339))
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to set DNS server start time: %w", result.Error)
+	}
+
+	return nil
+}
+
+// GetDNSServerStartTime retrieves the DNS server start time from the system metadata table
+func (c *Client) GetDNSServerStartTime() (*time.Time, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	sqlDB, err := c.db.WithContext(ctx).DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database connection: %w", err)
+	}
+
+	var metadataValue string
+	query := `
+		SELECT metadata_value
+		FROM system_metadata
+		WHERE metadata_key = $1
+		LIMIT 1
+	`
+	err = sqlDB.QueryRowContext(ctx, query, MetadataKeyDNSServerStartTime).Scan(&metadataValue)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get DNS server start time: %w", err)
+	}
+
+	if metadataValue == "" {
+		return nil, nil
+	}
+
+	startTime, err := time.Parse(time.RFC3339, metadataValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse start time: %w", err)
+	}
+
+	return &startTime, nil
+}

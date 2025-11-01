@@ -273,9 +273,17 @@ func (s *Server) buildDashboardMetricsFromPostgresDirect() (*metrics.DashboardMe
 		return nil, fmt.Errorf("failed to get query types: %w", err)
 	}
 
+	// Get DNS server start time to calculate uptime
+	dnsServerStartTime, err := s.pgClient.GetDNSServerStartTime()
+	uptimeStr := "N/A"
+	if err == nil && dnsServerStartTime != nil {
+		uptime := time.Since(*dnsServerStartTime)
+		uptimeStr = formatDuration(uptime)
+	}
+
 	// Convert PostgreSQL types to metrics types
 	overview := metrics.OverviewMetrics{
-		Uptime:              "N/A", // We don't track uptime from DB
+		Uptime:              uptimeStr,
 		TotalRequests:       overviewStats.TotalRequests,
 		RequestsPerSecond:   0, // Calculate from time window if needed
 		CacheHitRate:        0,
@@ -324,6 +332,11 @@ func (s *Server) buildDashboardMetricsFromPostgresDirect() (*metrics.DashboardMe
 	// Build upstream servers stats (empty for now, can be added later)
 	upstreamServers := make(map[string]*metrics.UpstreamStats)
 
+	startTimeStr := time.Now().Format(time.RFC3339)
+	if dnsServerStartTime != nil {
+		startTimeStr = dnsServerStartTime.Format(time.RFC3339)
+	}
+
 	return &metrics.DashboardMetrics{
 		Overview:        overview,
 		TimeSeriesData:  timeSeries,
@@ -332,7 +345,7 @@ func (s *Server) buildDashboardMetricsFromPostgresDirect() (*metrics.DashboardMe
 		UpstreamServers: upstreamServers,
 		SystemInfo: metrics.SystemInfo{
 			Version:   version.Get().Short(),
-			StartTime: time.Now().Format(time.RFC3339), // Could track from DB if needed
+			StartTime: startTimeStr,
 		},
 	}, nil
 }
@@ -341,9 +354,17 @@ func (s *Server) buildDashboardMetricsFromPostgresDirect() (*metrics.DashboardMe
 func (s *Server) convertCachedStatsToDashboardMetrics(cachedStats *postgres.AggregatedStatsData) *metrics.DashboardMetrics {
 	overviewStats := cachedStats.OverviewStats
 
+	// Get DNS server start time to calculate uptime
+	dnsServerStartTime, err := s.pgClient.GetDNSServerStartTime()
+	uptimeStr := "N/A"
+	if err == nil && dnsServerStartTime != nil {
+		uptime := time.Since(*dnsServerStartTime)
+		uptimeStr = formatDuration(uptime)
+	}
+
 	// Convert overview stats
 	overview := metrics.OverviewMetrics{
-		Uptime:              "N/A",
+		Uptime:              uptimeStr,
 		TotalRequests:       overviewStats.TotalRequests,
 		RequestsPerSecond:   0,
 		CacheHitRate:        0,
@@ -391,6 +412,11 @@ func (s *Server) convertCachedStatsToDashboardMetrics(cachedStats *postgres.Aggr
 	// Build upstream servers stats (empty for now, can be added later)
 	upstreamServers := make(map[string]*metrics.UpstreamStats)
 
+	startTimeStr := time.Now().Format(time.RFC3339)
+	if dnsServerStartTime != nil {
+		startTimeStr = dnsServerStartTime.Format(time.RFC3339)
+	}
+
 	return &metrics.DashboardMetrics{
 		Overview:        overview,
 		TimeSeriesData:  timeSeries,
@@ -399,7 +425,7 @@ func (s *Server) convertCachedStatsToDashboardMetrics(cachedStats *postgres.Aggr
 		UpstreamServers: upstreamServers,
 		SystemInfo: metrics.SystemInfo{
 			Version:   version.Get().Short(),
-			StartTime: time.Now().Format(time.RFC3339),
+			StartTime: startTimeStr,
 		},
 	}
 }
@@ -885,4 +911,19 @@ func GetPortFromEnv(defaultPort string) string {
 		}
 	}
 	return defaultPort
+}
+
+// formatDuration formats a duration as a human-readable string
+func formatDuration(d time.Duration) string {
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+
+	if days > 0 {
+		return fmt.Sprintf("%dd %dh %dm", days, hours, minutes)
+	} else if hours > 0 {
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	} else {
+		return fmt.Sprintf("%dm", minutes)
+	}
 }
