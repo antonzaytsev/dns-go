@@ -5,6 +5,7 @@ import OverviewCards from '../components/dashboard/OverviewCards.tsx';
 import Charts from '../components/dashboard/Charts.tsx';
 import QueryTypes from '../components/dashboard/QueryTypes.tsx';
 import TopClients from '../components/dashboard/TopClients.tsx';
+import LogCounts from '../components/dashboard/LogCounts.tsx';
 import ConnectionStatus from '../components/shared/ConnectionStatus.tsx';
 import Navigation from '../components/shared/Navigation.tsx';
 
@@ -77,6 +78,11 @@ const DashboardPage: React.FC = () => {
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <QueryTypes queryTypes={metrics?.query_types} />
             <TopClients clients={metrics?.top_clients} />
+          </section>
+
+          {/* Log Storage Statistics */}
+          <section>
+            <LogCounts />
           </section>
 
         </div>

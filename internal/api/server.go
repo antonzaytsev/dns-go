@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"dns-go/internal/config"
-	"dns-go/internal/elasticsearch"
 	"dns-go/internal/metrics"
 	"dns-go/internal/monitor"
+	"dns-go/internal/postgres"
 	"dns-go/pkg/version"
 )
 
@@ -23,7 +23,7 @@ type Server struct {
 	server     *http.Server
 	metrics    *metrics.Metrics
 	logMonitor *monitor.LogMonitor
-	esClient   *elasticsearch.Client
+	pgClient   *postgres.Client
 	config     *config.Config
 	port       string
 }
@@ -55,59 +55,37 @@ func NewServer(cfg Config) (*Server, error) {
 		fmt.Println("Warning: No DNS log file found. Real-time metrics will not be available.")
 	}
 
-	// Initialize Elasticsearch client if host and port are provided
-	var esClient *elasticsearch.Client
-	esHost := os.Getenv("ELASTICSEARCH_HOST")
-	esPort := os.Getenv("ELASTICSEARCH_PORT")
+	// Initialize PostgreSQL client if configuration is provided
+	var pgClient *postgres.Client
+	pgHost := os.Getenv("POSTGRES_HOST")
+	pgPort := os.Getenv("POSTGRES_PORT")
+	pgDB := os.Getenv("POSTGRES_DB")
+	pgUser := os.Getenv("POSTGRES_USER")
+	pgPassword := os.Getenv("POSTGRES_PASSWORD")
 
-	if esHost != "" || esPort != "" {
-		esIndex := os.Getenv("ELASTICSEARCH_INDEX")
-		if esIndex == "" {
-			esIndex = "dns-logs"
+	if pgHost != "" || pgPort != "" || pgDB != "" {
+		pgConfig := postgres.Config{
+			Host:     pgHost,
+			Port:     pgPort,
+			Database: pgDB,
+			User:     pgUser,
+			Password: pgPassword,
 		}
 
-		esCfg := elasticsearch.Config{
-			Host:  esHost,
-			Port:  esPort,
-			Index: esIndex,
-		}
-
-		if client, err := elasticsearch.NewClient(esCfg); err == nil {
-			esClient = client
-			fmt.Println("✅ Elasticsearch client initialized successfully")
+		if client, err := postgres.NewClient(pgConfig); err == nil {
+			pgClient = client
+			fmt.Println("✅ PostgreSQL client initialized successfully")
 		} else {
-			fmt.Printf("⚠️  Warning: Failed to initialize Elasticsearch client: %v\n", err)
-			fmt.Println("📝 Falling back to file-based log search")
+			fmt.Printf("⚠️  Warning: Failed to initialize PostgreSQL client: %v\n", err)
 		}
 	} else {
-		// Fallback to URL for backward compatibility
-		if esURL := os.Getenv("ELASTICSEARCH_URL"); esURL != "" {
-			esIndex := os.Getenv("ELASTICSEARCH_INDEX")
-			if esIndex == "" {
-				esIndex = "dns-logs"
-			}
-
-			esCfg := elasticsearch.Config{
-				URL:   esURL,
-				Index: esIndex,
-			}
-
-			if client, err := elasticsearch.NewClient(esCfg); err == nil {
-				esClient = client
-				fmt.Println("✅ Elasticsearch client initialized successfully")
-			} else {
-				fmt.Printf("⚠️  Warning: Failed to initialize Elasticsearch client: %v\n", err)
-				fmt.Println("📝 Falling back to file-based log search")
-			}
-		} else {
-			fmt.Println("📝 No Elasticsearch host/port or URL provided, using file-based log search")
-		}
+		fmt.Println("📝 No PostgreSQL configuration provided")
 	}
 
 	s := &Server{
 		metrics:    metricsCollector,
 		logMonitor: logMonitor,
-		esClient:   esClient,
+		pgClient:   pgClient,
 		config:     cfg.DNSConfig,
 		port:       cfg.Port,
 	}
@@ -122,6 +100,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/version", s.handleVersion)
 	mux.HandleFunc("/api/dns-mappings", s.handleDNSMappings)
+	mux.HandleFunc("/api/log-counts", s.handleLogCounts)
 
 	// CORS middleware
 	handler := s.corsMiddleware(s.loggingMiddleware(mux))
@@ -153,11 +132,17 @@ func (s *Server) Start() error {
 	fmt.Printf("\n🌐 Access URLs:\n")
 	fmt.Printf("  Local:    http://localhost:%s/api\n", s.port)
 	fmt.Printf("  Network:  http://0.0.0.0:%s/api\n", s.port)
-	fmt.Printf("\n📊 Log search: %s\n", func() string {
-		if s.esClient != nil {
-			return "✅ Elasticsearch"
+	fmt.Printf("\n📊 Log storage: %s\n", func() string {
+		if s.pgClient != nil {
+			return "✅ PostgreSQL"
+		}
+		return "❌ None"
+	}())
+	fmt.Printf("🔍 Log search: %s\n", func() string {
+		if s.pgClient != nil {
+			return "✅ PostgreSQL"
 		} else if s.logMonitor != nil {
-			return "📁 File-based"
+			return "📁 File-based (fallback)"
 		}
 		return "❌ Disabled"
 	}())
@@ -173,9 +158,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		s.logMonitor.Stop()
 	}
 
-	// Close Elasticsearch client
-	if s.esClient != nil {
-		s.esClient.Close()
+	// Close PostgreSQL client
+	if s.pgClient != nil {
+		s.pgClient.Close()
 	}
 
 	return s.server.Shutdown(ctx)
@@ -294,15 +279,16 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		since = &parsedTime
 	}
 
-	// Only use Elasticsearch for search - no file fallback
-	if s.esClient == nil {
-		http.Error(w, "Search service unavailable: Elasticsearch not connected", http.StatusServiceUnavailable)
+	// Use PostgreSQL for search
+	if s.pgClient == nil {
+		http.Error(w, "Search service unavailable: PostgreSQL not connected", http.StatusServiceUnavailable)
 		return
 	}
 
-	searchResult, err := s.esClient.SearchLogs(searchTerm, limit, offset, since)
+	// Search in PostgreSQL
+	searchResult, err := s.pgClient.SearchLogs(searchTerm, limit, offset, since)
 	if err != nil {
-		fmt.Printf("Elasticsearch search failed: %v\n", err)
+		fmt.Printf("PostgreSQL search failed: %v\n", err)
 		http.Error(w, "Search failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -314,7 +300,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		"offset":  offset,
 		"query":   searchTerm,
 		"since":   since,
-		"source":  "elasticsearch",
+		"source":  "postgres",
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -338,6 +324,45 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		"build_date": versionInfo.BuildDate,
 		"go_version": versionInfo.GoVersion,
 	})
+}
+
+func (s *Server) handleLogCounts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	response := map[string]interface{}{
+		"postgres": nil,
+	}
+
+	// Get PostgreSQL count
+	if s.pgClient != nil {
+		pgCount, err := s.pgClient.GetLogCount()
+		if err != nil {
+			response["postgres"] = map[string]interface{}{
+				"count": nil,
+				"error": err.Error(),
+			}
+		} else {
+			response["postgres"] = map[string]interface{}{
+				"count": pgCount,
+				"error": nil,
+			}
+		}
+	} else {
+		response["postgres"] = map[string]interface{}{
+			"count": nil,
+			"error": "PostgreSQL not connected",
+		}
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode log counts", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (s *Server) handleDNSMappings(w http.ResponseWriter, r *http.Request) {

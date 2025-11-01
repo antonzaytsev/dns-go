@@ -488,6 +488,63 @@ func isPartialIP(str string) bool {
 	return strings.Contains(str, ".") || (len(str) > 0 && str[0] >= '0' && str[0] <= '9')
 }
 
+// GetLogCount returns the total number of log entries in Elasticsearch
+func (c *Client) GetLogCount() (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Force refresh before counting to ensure all indexed documents are searchable
+	refreshReq := esapi.IndicesRefreshRequest{
+		Index: []string{c.index},
+	}
+	refreshRes, err := refreshReq.Do(ctx, c.es)
+	if err != nil {
+		return 0, fmt.Errorf("failed to refresh index: %w", err)
+	}
+	refreshRes.Body.Close()
+
+	searchBody := map[string]interface{}{
+		"query": map[string]interface{}{
+			"match_all": map[string]interface{}{},
+		},
+		"size": 0,
+	}
+
+	searchBytes, err := json.Marshal(searchBody)
+	if err != nil {
+		return 0, fmt.Errorf("failed to marshal search query: %w", err)
+	}
+
+	req := esapi.SearchRequest{
+		Index: []string{c.index},
+		Body:  strings.NewReader(string(searchBytes)),
+	}
+
+	res, err := req.Do(ctx, c.es)
+	if err != nil {
+		return 0, fmt.Errorf("failed to search Elasticsearch: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return 0, fmt.Errorf("Elasticsearch search error: %s", res.String())
+	}
+
+	var response struct {
+		Hits struct {
+			Total struct {
+				Value int64 `json:"value"`
+			} `json:"total"`
+		} `json:"hits"`
+	}
+
+	if err := json.NewDecoder(res.Body).Decode(&response); err != nil {
+		return 0, fmt.Errorf("failed to decode search response: %w", err)
+	}
+
+	return response.Hits.Total.Value, nil
+}
+
 // HealthCheck checks if Elasticsearch is healthy
 func (c *Client) HealthCheck() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -504,6 +561,11 @@ func (c *Client) HealthCheck() error {
 	}
 
 	return nil
+}
+
+// GetClient returns the underlying Elasticsearch client
+func (c *Client) GetClient() *elasticsearch.Client {
+	return c.es
 }
 
 // Close closes the Elasticsearch client

@@ -123,6 +123,15 @@ export interface APIResponse<T = any> {
   success?: boolean;
 }
 
+export interface LogCountResponse {
+  count: number | null;
+  error: string | null;
+}
+
+export interface LogCounts {
+  postgres: LogCountResponse;
+}
+
 // ===== COMPONENT PROPS INTERFACES =====
 
 // Using base types for consistency

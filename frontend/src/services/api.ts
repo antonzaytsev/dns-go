@@ -7,6 +7,7 @@ import type {
   DNSMappingsResponse,
   ClientsResponse,
   APIResponse,
+  LogCounts,
 } from '../types';
 
 const port: string = process.env.REACT_APP_API_PORT || '8080';
@@ -84,6 +85,17 @@ export const dnsApi = {
       return response.data;
     } catch (error) {
       console.error('Failed to fetch version:', error);
+      throw error;
+    }
+  },
+
+  // Get log counts from Elasticsearch and PostgreSQL
+  getLogCounts: async (): Promise<LogCounts> => {
+    try {
+      const response: AxiosResponse<LogCounts> = await api.get('/api/log-counts');
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch log counts:', error);
       throw error;
     }
   },

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"dns-go/internal/elasticsearch"
+	"dns-go/internal/postgres"
 	"dns-go/internal/types"
 )
 
@@ -50,7 +50,7 @@ type Logger struct {
 	humanLogger *log.Logger
 	jsonFile    *os.File
 	humanFile   *os.File
-	esClient    *elasticsearch.Client
+	pgClient    *postgres.Client
 }
 
 // New creates a new structured logger
@@ -110,96 +110,50 @@ func NewFromConfig(logFile string, logLevel string) (*Logger, *os.File, *os.File
 		humanFile:   humanFile,
 	}
 
-	// Try to initialize Elasticsearch client with retry logic
-	esHost := os.Getenv("ELASTICSEARCH_HOST")
-	esPort := os.Getenv("ELASTICSEARCH_PORT")
+	// Try to initialize PostgreSQL client with retry logic
+	pgHost := os.Getenv("POSTGRES_HOST")
+	pgPort := os.Getenv("POSTGRES_PORT")
+	pgDB := os.Getenv("POSTGRES_DB")
+	pgUser := os.Getenv("POSTGRES_USER")
+	pgPassword := os.Getenv("POSTGRES_PASSWORD")
 
-	if esHost != "" || esPort != "" {
-		esIndex := os.Getenv("ELASTICSEARCH_INDEX")
-		if esIndex == "" {
-			esIndex = "dns-logs"
+	if pgHost != "" || pgPort != "" || pgDB != "" {
+		pgConfig := postgres.Config{
+			Host:     pgHost,
+			Port:     pgPort,
+			Database: pgDB,
+			User:     pgUser,
+			Password: pgPassword,
 		}
 
-		cfg := elasticsearch.Config{
-			Host:  esHost,
-			Port:  esPort,
-			Index: esIndex,
-		}
-
-		// Retry connecting to Elasticsearch with exponential backoff
+		// Retry connecting to PostgreSQL with exponential backoff
 		maxRetries := 5
 		for i := 0; i < maxRetries; i++ {
-			if esClient, err := elasticsearch.NewClient(cfg); err == nil {
-				logger.esClient = esClient
+			if pgClient, err := postgres.NewClient(pgConfig); err == nil {
+				logger.pgClient = pgClient
 				if logger.humanLogger != nil {
-					logger.humanLogger.Printf("✅ DNS server Elasticsearch client initialized successfully")
+					logger.humanLogger.Printf("✅ DNS server PostgreSQL client initialized successfully")
 				} else {
-					log.Printf("✅ DNS server Elasticsearch client initialized successfully")
+					log.Printf("✅ DNS server PostgreSQL client initialized successfully")
 				}
 				break
 			} else {
 				if i < maxRetries-1 {
 					waitTime := time.Duration(1<<uint(i)) * time.Second // 1s, 2s, 4s, 8s
 					if logger.humanLogger != nil {
-						logger.humanLogger.Printf("⏳ DNS server Elasticsearch connection attempt %d/%d failed: %v. Retrying in %v...",
+						logger.humanLogger.Printf("⏳ DNS server PostgreSQL connection attempt %d/%d failed: %v. Retrying in %v...",
 							i+1, maxRetries, err, waitTime)
 					} else {
-						log.Printf("⏳ DNS server Elasticsearch connection attempt %d/%d failed: %v. Retrying in %v...",
+						log.Printf("⏳ DNS server PostgreSQL connection attempt %d/%d failed: %v. Retrying in %v...",
 							i+1, maxRetries, err, waitTime)
 					}
 					time.Sleep(waitTime)
 				} else {
-					// Log ES initialization failure but don't fail the logger
+					// Log PG initialization failure but don't fail the logger
 					if logger.humanLogger != nil {
-						logger.humanLogger.Printf("⚠️  Warning: DNS server failed to initialize Elasticsearch client after %d attempts: %v", maxRetries, err)
+						logger.humanLogger.Printf("⚠️  Warning: DNS server failed to initialize PostgreSQL client after %d attempts: %v", maxRetries, err)
 					} else {
-						log.Printf("⚠️  Warning: DNS server failed to initialize Elasticsearch client after %d attempts: %v", maxRetries, err)
-					}
-				}
-			}
-		}
-	} else {
-		// Fallback to URL for backward compatibility
-		if esURL := os.Getenv("ELASTICSEARCH_URL"); esURL != "" {
-			esIndex := os.Getenv("ELASTICSEARCH_INDEX")
-			if esIndex == "" {
-				esIndex = "dns-logs"
-			}
-
-			cfg := elasticsearch.Config{
-				URL:   esURL,
-				Index: esIndex,
-			}
-
-			// Retry connecting to Elasticsearch with exponential backoff
-			maxRetries := 5
-			for i := 0; i < maxRetries; i++ {
-				if esClient, err := elasticsearch.NewClient(cfg); err == nil {
-					logger.esClient = esClient
-					if logger.humanLogger != nil {
-						logger.humanLogger.Printf("✅ DNS server Elasticsearch client initialized successfully")
-					} else {
-						log.Printf("✅ DNS server Elasticsearch client initialized successfully")
-					}
-					break
-				} else {
-					if i < maxRetries-1 {
-						waitTime := time.Duration(1<<uint(i)) * time.Second // 1s, 2s, 4s, 8s
-						if logger.humanLogger != nil {
-							logger.humanLogger.Printf("⏳ DNS server Elasticsearch connection attempt %d/%d failed: %v. Retrying in %v...",
-								i+1, maxRetries, err, waitTime)
-						} else {
-							log.Printf("⏳ DNS server Elasticsearch connection attempt %d/%d failed: %v. Retrying in %v...",
-								i+1, maxRetries, err, waitTime)
-						}
-						time.Sleep(waitTime)
-					} else {
-						// Log ES initialization failure but don't fail the logger
-						if logger.humanLogger != nil {
-							logger.humanLogger.Printf("⚠️  Warning: DNS server failed to initialize Elasticsearch client after %d attempts: %v", maxRetries, err)
-						} else {
-							log.Printf("⚠️  Warning: DNS server failed to initialize Elasticsearch client after %d attempts: %v", maxRetries, err)
-						}
+						log.Printf("⚠️  Warning: DNS server failed to initialize PostgreSQL client after %d attempts: %v", maxRetries, err)
 					}
 				}
 			}
@@ -328,20 +282,20 @@ func (l *Logger) LogRequestResponse(uuid, client, query, qtype, status string, d
 	}
 }
 
-// LogDNSEntry logs a complete DNS log entry to both file and Elasticsearch
+// LogDNSEntry logs a complete DNS log entry to file and PostgreSQL
 func (l *Logger) LogDNSEntry(entry types.LogEntry) {
 	// Log to JSON file
 	l.LogJSON(entry)
 
-	// Log to Elasticsearch if available
-	if l.esClient != nil {
+	// Log to PostgreSQL if available
+	if l.pgClient != nil {
 		go func() {
-			if err := l.esClient.IndexLogEntry(entry); err != nil {
+			if err := l.pgClient.InsertLogEntry(entry); err != nil {
 				// Log error but don't block the main logging flow
 				if l.humanLogger != nil {
-					l.humanLogger.Printf("Warning: Failed to index log entry to Elasticsearch: %v", err)
+					l.humanLogger.Printf("Warning: Failed to insert log entry to PostgreSQL: %v", err)
 				} else {
-					log.Printf("Warning: Failed to index log entry to Elasticsearch: %v", err)
+					log.Printf("Warning: Failed to insert log entry to PostgreSQL: %v", err)
 				}
 			}
 		}()

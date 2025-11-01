@@ -4,6 +4,7 @@ go 1.21
 
 require (
 	github.com/elastic/go-elasticsearch/v8 v8.11.0
+	github.com/lib/pq v1.10.9
 	github.com/miekg/dns v1.1.57
 )
 
