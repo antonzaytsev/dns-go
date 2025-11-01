@@ -462,6 +462,285 @@ func (c *Client) GetLogCount() (int64, error) {
 	return count, nil
 }
 
+// TimeSeriesPoint represents a time series data point
+type TimeSeriesPoint struct {
+	Timestamp int64
+	Value     int64
+}
+
+// GetTimeSeriesData returns aggregated time series data from PostgreSQL
+func (c *Client) GetTimeSeriesData() (map[string][]TimeSeriesPoint, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result := make(map[string][]TimeSeriesPoint)
+
+	// Last hour - per minute (75 minutes)
+	hourSQL := `
+		SELECT 
+			EXTRACT(EPOCH FROM DATE_TRUNC('minute', timestamp))::BIGINT as ts,
+			COUNT(*)::BIGINT as count
+		FROM dns_logs
+		WHERE timestamp >= NOW() - INTERVAL '75 minutes'
+		GROUP BY DATE_TRUNC('minute', timestamp)
+		ORDER BY ts ASC
+		LIMIT 75
+	`
+	rows, err := c.db.QueryContext(ctx, hourSQL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query hourly data: %w", err)
+	}
+	defer rows.Close()
+
+	var hourData []TimeSeriesPoint
+	for rows.Next() {
+		var point TimeSeriesPoint
+		if err := rows.Scan(&point.Timestamp, &point.Value); err != nil {
+			return nil, fmt.Errorf("failed to scan hour data: %w", err)
+		}
+		hourData = append(hourData, point)
+	}
+	result["requests_last_hour"] = hourData
+
+	// Last day - per hour (75 hours)
+	daySQL := `
+		SELECT 
+			EXTRACT(EPOCH FROM DATE_TRUNC('hour', timestamp))::BIGINT as ts,
+			COUNT(*)::BIGINT as count
+		FROM dns_logs
+		WHERE timestamp >= NOW() - INTERVAL '75 hours'
+		GROUP BY DATE_TRUNC('hour', timestamp)
+		ORDER BY ts ASC
+		LIMIT 75
+	`
+	rows, err = c.db.QueryContext(ctx, daySQL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query daily data: %w", err)
+	}
+	defer rows.Close()
+
+	var dayData []TimeSeriesPoint
+	for rows.Next() {
+		var point TimeSeriesPoint
+		if err := rows.Scan(&point.Timestamp, &point.Value); err != nil {
+			return nil, fmt.Errorf("failed to scan day data: %w", err)
+		}
+		dayData = append(dayData, point)
+	}
+	result["requests_last_day"] = dayData
+
+	// Last week - per day (75 days)
+	weekSQL := `
+		SELECT 
+			EXTRACT(EPOCH FROM DATE_TRUNC('day', timestamp))::BIGINT as ts,
+			COUNT(*)::BIGINT as count
+		FROM dns_logs
+		WHERE timestamp >= NOW() - INTERVAL '75 days'
+		GROUP BY DATE_TRUNC('day', timestamp)
+		ORDER BY ts ASC
+		LIMIT 75
+	`
+	rows, err = c.db.QueryContext(ctx, weekSQL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query weekly data: %w", err)
+	}
+	defer rows.Close()
+
+	var weekData []TimeSeriesPoint
+	for rows.Next() {
+		var point TimeSeriesPoint
+		if err := rows.Scan(&point.Timestamp, &point.Value); err != nil {
+			return nil, fmt.Errorf("failed to scan week data: %w", err)
+		}
+		weekData = append(weekData, point)
+	}
+	result["requests_last_week"] = weekData
+
+	// Last month - per day (75 days)
+	monthSQL := `
+		SELECT 
+			EXTRACT(EPOCH FROM DATE_TRUNC('day', timestamp))::BIGINT as ts,
+			COUNT(*)::BIGINT as count
+		FROM dns_logs
+		WHERE timestamp >= NOW() - INTERVAL '75 days'
+		GROUP BY DATE_TRUNC('day', timestamp)
+		ORDER BY ts ASC
+		LIMIT 75
+	`
+	rows, err = c.db.QueryContext(ctx, monthSQL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query monthly data: %w", err)
+	}
+	defer rows.Close()
+
+	var monthData []TimeSeriesPoint
+	for rows.Next() {
+		var point TimeSeriesPoint
+		if err := rows.Scan(&point.Timestamp, &point.Value); err != nil {
+			return nil, fmt.Errorf("failed to scan month data: %w", err)
+		}
+		monthData = append(monthData, point)
+	}
+	result["requests_last_month"] = monthData
+
+	return result, nil
+}
+
+// ClientMetric represents aggregated client statistics
+type ClientMetric struct {
+	IP           string
+	Requests     int64
+	CacheHitRate float64
+	SuccessRate  float64
+	LastSeen     time.Time
+}
+
+// GetTopClients returns top clients aggregated from PostgreSQL
+func (c *Client) GetTopClients(limit int) ([]ClientMetric, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	sql := `
+		SELECT 
+			client_ip,
+			COUNT(*)::BIGINT as total_requests,
+			COUNT(*) FILTER (WHERE cache_hit = true)::BIGINT as cache_hits,
+			COUNT(*) FILTER (WHERE status = 'success' OR status = 'cache_hit')::BIGINT as successful,
+			MAX(timestamp) as last_seen
+		FROM dns_logs
+		GROUP BY client_ip
+		ORDER BY total_requests DESC
+		LIMIT $1
+	`
+
+	rows, err := c.db.QueryContext(ctx, sql, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query top clients: %w", err)
+	}
+	defer rows.Close()
+
+	var clients []ClientMetric
+	for rows.Next() {
+		var client ClientMetric
+		var totalRequests, cacheHits, successful int64
+
+		err := rows.Scan(&client.IP, &totalRequests, &cacheHits, &successful, &client.LastSeen)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan client data: %w", err)
+		}
+
+		client.Requests = totalRequests
+		if totalRequests > 0 {
+			client.CacheHitRate = float64(cacheHits) / float64(totalRequests) * 100
+			client.SuccessRate = float64(successful) / float64(totalRequests) * 100
+		}
+
+		clients = append(clients, client)
+	}
+
+	return clients, nil
+}
+
+// QueryTypeMetric represents aggregated query type statistics
+type QueryTypeMetric struct {
+	Type  string
+	Count int64
+}
+
+// GetTopQueryTypes returns top query types aggregated from PostgreSQL
+func (c *Client) GetTopQueryTypes(limit int) ([]QueryTypeMetric, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	sql := `
+		SELECT 
+			query_type,
+			COUNT(*)::BIGINT as count
+		FROM dns_logs
+		GROUP BY query_type
+		ORDER BY count DESC
+		LIMIT $1
+	`
+
+	rows, err := c.db.QueryContext(ctx, sql, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query query types: %w", err)
+	}
+	defer rows.Close()
+
+	var queryTypes []QueryTypeMetric
+	for rows.Next() {
+		var qt QueryTypeMetric
+		if err := rows.Scan(&qt.Type, &qt.Count); err != nil {
+			return nil, fmt.Errorf("failed to scan query type data: %w", err)
+		}
+		queryTypes = append(queryTypes, qt)
+	}
+
+	return queryTypes, nil
+}
+
+// OverviewStats represents overview statistics
+type OverviewStats struct {
+	TotalRequests       int64
+	CacheHits           int64
+	SuccessfulQueries   int64
+	AverageResponseTime float64
+	ActiveClients       int
+}
+
+// GetOverviewStats returns overview statistics from PostgreSQL
+func (c *Client) GetOverviewStats() (*OverviewStats, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	stats := &OverviewStats{}
+
+	// Get total requests, cache hits, and average response time
+	sql := `
+		SELECT 
+			COUNT(*)::BIGINT as total_requests,
+			COUNT(*) FILTER (WHERE cache_hit = true)::BIGINT as cache_hits,
+			COUNT(*) FILTER (WHERE status = 'success' OR status = 'cache_hit')::BIGINT as successful,
+			AVG(duration_ms) as avg_response_time
+		FROM dns_logs
+	`
+
+	err := c.db.QueryRowContext(ctx, sql).Scan(
+		&stats.TotalRequests,
+		&stats.CacheHits,
+		&stats.SuccessfulQueries,
+		&stats.AverageResponseTime,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query overview stats: %w", err)
+	}
+
+	// Get active clients (seen in last hour)
+	clientSQL := `
+		SELECT COUNT(DISTINCT client_ip)::INTEGER
+		FROM dns_logs
+		WHERE timestamp >= NOW() - INTERVAL '1 hour'
+	`
+
+	err = c.db.QueryRowContext(ctx, clientSQL).Scan(&stats.ActiveClients)
+	if err != nil {
+		// If this fails, we can still return the other stats
+		stats.ActiveClients = 0
+	}
+
+	return stats, nil
+}
+
+// GetRecentRequests returns recent requests for display
+func (c *Client) GetRecentRequests(limit int) ([]types.LogEntry, error) {
+	result, err := c.SearchLogs("", limit, 0, nil)
+	if err != nil {
+		return nil, err
+	}
+	return result.Results, nil
+}
+
 // HealthCheck checks if PostgreSQL is healthy
 func (c *Client) HealthCheck() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

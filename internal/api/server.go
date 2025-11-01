@@ -181,12 +181,129 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
-	dashboardMetrics := s.metrics.GetDashboardMetrics(version.Get().Short())
+	if s.pgClient == nil {
+		http.Error(w, "PostgreSQL not connected", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Build dashboard metrics from PostgreSQL
+	dashboardMetrics, err := s.buildDashboardMetricsFromPostgres()
+	if err != nil {
+		http.Error(w, "Failed to build metrics: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	if err := json.NewEncoder(w).Encode(dashboardMetrics); err != nil {
 		http.Error(w, "Failed to encode metrics", http.StatusInternalServerError)
 		return
 	}
+}
+
+// buildDashboardMetricsFromPostgres builds dashboard metrics by aggregating data from PostgreSQL
+func (s *Server) buildDashboardMetricsFromPostgres() (*metrics.DashboardMetrics, error) {
+	if s.pgClient == nil {
+		return nil, fmt.Errorf("PostgreSQL client not available")
+	}
+
+	// Get all data in parallel
+	overviewStats, err := s.pgClient.GetOverviewStats()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get overview stats: %w", err)
+	}
+
+	timeSeriesData, err := s.pgClient.GetTimeSeriesData()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get time series data: %w", err)
+	}
+
+	topClients, err := s.pgClient.GetTopClients(20)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get top clients: %w", err)
+	}
+
+	topQueryTypes, err := s.pgClient.GetTopQueryTypes(8)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get query types: %w", err)
+	}
+
+	recentRequests, err := s.pgClient.GetRecentRequests(100)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get recent requests: %w", err)
+	}
+
+	// Convert PostgreSQL types to metrics types
+	overview := metrics.OverviewMetrics{
+		Uptime:              "N/A", // We don't track uptime from DB
+		TotalRequests:       overviewStats.TotalRequests,
+		RequestsPerSecond:   0, // Calculate from time window if needed
+		CacheHitRate:        0,
+		SuccessRate:         0,
+		AverageResponseTime: overviewStats.AverageResponseTime,
+		Clients:             overviewStats.ActiveClients,
+	}
+
+	if overviewStats.TotalRequests > 0 {
+		overview.CacheHitRate = float64(overviewStats.CacheHits) / float64(overviewStats.TotalRequests) * 100
+		overview.SuccessRate = float64(overviewStats.SuccessfulQueries) / float64(overviewStats.TotalRequests) * 100
+	}
+
+	// Convert time series data
+	timeSeries := metrics.TimeSeriesData{
+		RequestsLastHour:  convertTimeSeriesPoints(timeSeriesData["requests_last_hour"]),
+		RequestsLastDay:   convertTimeSeriesPoints(timeSeriesData["requests_last_day"]),
+		RequestsLastWeek:  convertTimeSeriesPoints(timeSeriesData["requests_last_week"]),
+		RequestsLastMonth: convertTimeSeriesPoints(timeSeriesData["requests_last_month"]),
+	}
+
+	// Convert top clients
+	clientMetrics := make([]metrics.ClientMetric, len(topClients))
+	for i, client := range topClients {
+		clientMetrics[i] = metrics.ClientMetric{
+			IP:           client.IP,
+			Requests:     client.Requests,
+			CacheHitRate: client.CacheHitRate,
+			SuccessRate:  client.SuccessRate,
+			LastSeen:     client.LastSeen,
+		}
+	}
+
+	// Convert query types
+	queryTypeMetrics := make([]metrics.QueryTypeMetric, len(topQueryTypes))
+	for i, qt := range topQueryTypes {
+		queryTypeMetrics[i] = metrics.QueryTypeMetric{
+			Type:  qt.Type,
+			Count: qt.Count,
+		}
+	}
+
+	// Build upstream servers stats (empty for now, can be added later)
+	upstreamServers := make(map[string]*metrics.UpstreamStats)
+
+	return &metrics.DashboardMetrics{
+		Overview:        overview,
+		TimeSeriesData:  timeSeries,
+		TopClients:      clientMetrics,
+		QueryTypes:      queryTypeMetrics,
+		UpstreamServers: upstreamServers,
+		Requests:        recentRequests,
+		SystemInfo: metrics.SystemInfo{
+			Version:   version.Get().Short(),
+			StartTime: time.Now().Format(time.RFC3339), // Could track from DB if needed
+		},
+	}, nil
+}
+
+// convertTimeSeriesPoints converts PostgreSQL time series points to metrics format
+func convertTimeSeriesPoints(points []postgres.TimeSeriesPoint) []metrics.TimePoint {
+	result := make([]metrics.TimePoint, len(points))
+	for i, point := range points {
+		// PostgreSQL returns Unix timestamp in seconds, frontend expects milliseconds
+		result[i] = metrics.TimePoint{
+			Timestamp: point.Timestamp * 1000,
+			Value:     point.Value,
+		}
+	}
+	return result
 }
 
 func (s *Server) handleClients(w http.ResponseWriter, r *http.Request) {
@@ -197,7 +314,29 @@ func (s *Server) handleClients(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
-	clients := s.metrics.GetAllClients()
+	if s.pgClient == nil {
+		http.Error(w, "PostgreSQL not connected", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Get all clients from PostgreSQL
+	pgClients, err := s.pgClient.GetTopClients(1000) // Get many clients
+	if err != nil {
+		http.Error(w, "Failed to get clients: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Convert to metrics.ClientMetric format
+	clients := make([]metrics.ClientMetric, len(pgClients))
+	for i, client := range pgClients {
+		clients[i] = metrics.ClientMetric{
+			IP:           client.IP,
+			Requests:     client.Requests,
+			CacheHitRate: client.CacheHitRate,
+			SuccessRate:  client.SuccessRate,
+			LastSeen:     client.LastSeen,
+		}
+	}
 
 	response := map[string]interface{}{
 		"clients": clients,
