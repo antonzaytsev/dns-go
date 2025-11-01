@@ -234,11 +234,6 @@ func (s *Server) buildDashboardMetricsFromPostgres() (*metrics.DashboardMetrics,
 		return nil, fmt.Errorf("failed to get query types: %w", err)
 	}
 
-	recentRequests, err := s.pgClient.GetRecentRequests(100)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get recent requests: %w", err)
-	}
-
 	// Convert PostgreSQL types to metrics types
 	overview := metrics.OverviewMetrics{
 		Uptime:              "N/A", // We don't track uptime from DB
@@ -293,7 +288,6 @@ func (s *Server) buildDashboardMetricsFromPostgres() (*metrics.DashboardMetrics,
 		TopClients:      clientMetrics,
 		QueryTypes:      queryTypeMetrics,
 		UpstreamServers: upstreamServers,
-		Requests:        recentRequests,
 		SystemInfo: metrics.SystemInfo{
 			Version:   version.Get().Short(),
 			StartTime: time.Now().Format(time.RFC3339), // Could track from DB if needed
