@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"dns-go/internal/aggregation"
 	"dns-go/internal/config"
 	"dns-go/internal/metrics"
 	"dns-go/internal/monitor"
@@ -26,6 +27,7 @@ type Server struct {
 	pgClient   *postgres.Client
 	config     *config.Config
 	port       string
+	scheduler  *aggregation.Scheduler
 }
 
 // Config holds API server configuration
@@ -98,6 +100,16 @@ func NewServer(cfg Config) (*Server, error) {
 		port:       cfg.Port,
 	}
 
+	// Initialize and start background aggregation scheduler if PostgreSQL is available
+	if pgClient != nil {
+		s.scheduler = aggregation.NewScheduler(pgClient)
+		go func() {
+			if err := s.scheduler.Start(); err != nil {
+				fmt.Printf("⚠️  Warning: Failed to start aggregation scheduler: %v\n", err)
+			}
+		}()
+	}
+
 	// Setup HTTP routes
 	mux := http.NewServeMux()
 
@@ -161,7 +173,16 @@ func (s *Server) Start() error {
 
 // Shutdown gracefully shuts down the API server
 func (s *Server) Shutdown(ctx context.Context) error {
-	// Stop log monitor first
+	// Stop scheduler first
+	if s.scheduler != nil {
+		schedulerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := s.scheduler.Stop(schedulerCtx); err != nil {
+			fmt.Printf("⚠️  Warning: Error stopping scheduler: %v\n", err)
+		}
+	}
+
+	// Stop log monitor
 	if s.logMonitor != nil {
 		s.logMonitor.Stop()
 	}
@@ -207,8 +228,26 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// buildDashboardMetricsFromPostgres builds dashboard metrics by aggregating data from PostgreSQL
+// buildDashboardMetricsFromPostgres builds dashboard metrics from cached aggregated stats
 func (s *Server) buildDashboardMetricsFromPostgres() (*metrics.DashboardMetrics, error) {
+	if s.pgClient == nil {
+		return nil, fmt.Errorf("PostgreSQL client not available")
+	}
+
+	// Try to get cached aggregated stats first
+	cachedStats, err := s.pgClient.GetCachedAggregatedStats()
+	if err == nil && cachedStats != nil {
+		// Use cached stats
+		return s.convertCachedStatsToDashboardMetrics(cachedStats), nil
+	}
+
+	// Fallback: calculate on the fly if cache is not available (e.g., first run or cache miss)
+	// This is expected on first startup before the first hourly aggregation completes
+	return s.buildDashboardMetricsFromPostgresDirect()
+}
+
+// buildDashboardMetricsFromPostgresDirect builds dashboard metrics by aggregating data from PostgreSQL directly
+func (s *Server) buildDashboardMetricsFromPostgresDirect() (*metrics.DashboardMetrics, error) {
 	if s.pgClient == nil {
 		return nil, fmt.Errorf("PostgreSQL client not available")
 	}
@@ -296,6 +335,73 @@ func (s *Server) buildDashboardMetricsFromPostgres() (*metrics.DashboardMetrics,
 			StartTime: time.Now().Format(time.RFC3339), // Could track from DB if needed
 		},
 	}, nil
+}
+
+// convertCachedStatsToDashboardMetrics converts cached aggregated stats to dashboard metrics format
+func (s *Server) convertCachedStatsToDashboardMetrics(cachedStats *postgres.AggregatedStatsData) *metrics.DashboardMetrics {
+	overviewStats := cachedStats.OverviewStats
+
+	// Convert overview stats
+	overview := metrics.OverviewMetrics{
+		Uptime:              "N/A",
+		TotalRequests:       overviewStats.TotalRequests,
+		RequestsPerSecond:   0,
+		CacheHitRate:        0,
+		SuccessRate:         0,
+		AverageResponseTime: overviewStats.AverageResponseTime,
+		Clients:             overviewStats.ActiveClients,
+	}
+
+	if overviewStats.TotalRequests > 0 {
+		overview.CacheHitRate = float64(overviewStats.CacheHits) / float64(overviewStats.TotalRequests) * 100
+		overview.SuccessRate = float64(overviewStats.SuccessfulQueries) / float64(overviewStats.TotalRequests) * 100
+	}
+
+	// Convert time series data
+	weeklyData := aggregateDailyToWeekly(cachedStats.TimeSeriesData["requests_last_month"])
+
+	timeSeries := metrics.TimeSeriesData{
+		RequestsLastHour:  convertTimeSeriesPoints(cachedStats.TimeSeriesData["requests_last_hour"]),
+		RequestsLastDay:   convertTimeSeriesPoints(cachedStats.TimeSeriesData["requests_last_day"]),
+		RequestsLastWeek:  convertTimeSeriesPoints(cachedStats.TimeSeriesData["requests_last_week"]),
+		RequestsLastMonth: weeklyData,
+	}
+
+	// Convert top clients
+	clientMetrics := make([]metrics.ClientMetric, len(cachedStats.TopClients))
+	for i, client := range cachedStats.TopClients {
+		clientMetrics[i] = metrics.ClientMetric{
+			IP:           client.IP,
+			Requests:     client.Requests,
+			CacheHitRate: client.CacheHitRate,
+			SuccessRate:  client.SuccessRate,
+			LastSeen:     client.LastSeen,
+		}
+	}
+
+	// Convert query types
+	queryTypeMetrics := make([]metrics.QueryTypeMetric, len(cachedStats.QueryTypes))
+	for i, qt := range cachedStats.QueryTypes {
+		queryTypeMetrics[i] = metrics.QueryTypeMetric{
+			Type:  qt.Type,
+			Count: qt.Count,
+		}
+	}
+
+	// Build upstream servers stats (empty for now, can be added later)
+	upstreamServers := make(map[string]*metrics.UpstreamStats)
+
+	return &metrics.DashboardMetrics{
+		Overview:        overview,
+		TimeSeriesData:  timeSeries,
+		TopClients:      clientMetrics,
+		QueryTypes:      queryTypeMetrics,
+		UpstreamServers: upstreamServers,
+		SystemInfo: metrics.SystemInfo{
+			Version:   version.Get().Short(),
+			StartTime: time.Now().Format(time.RFC3339),
+		},
+	}
 }
 
 // convertTimeSeriesPoints converts PostgreSQL time series points to metrics format

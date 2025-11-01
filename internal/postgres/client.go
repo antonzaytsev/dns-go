@@ -981,3 +981,109 @@ func (c *Client) MigrateDNSMappingsFromJSON(jsonFilePath string) error {
 
 	return nil
 }
+
+// AggregatedStatsData represents the cached aggregated statistics
+type AggregatedStatsData struct {
+	OverviewStats  *OverviewStats               `json:"overview_stats"`
+	TimeSeriesData map[string][]TimeSeriesPoint `json:"time_series_data"`
+	TopClients     []ClientMetric               `json:"top_clients"`
+	QueryTypes     []QueryTypeMetric            `json:"query_types"`
+	UpdatedAt      time.Time                    `json:"updated_at"`
+}
+
+// CalculateAndStoreAggregatedStats calculates all aggregated statistics and stores them in cache
+func (c *Client) CalculateAndStoreAggregatedStats() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Get all the stats data
+	overviewStats, err := c.GetOverviewStats()
+	if err != nil {
+		return fmt.Errorf("failed to get overview stats: %w", err)
+	}
+
+	timeSeriesData, err := c.GetTimeSeriesData()
+	if err != nil {
+		return fmt.Errorf("failed to get time series data: %w", err)
+	}
+
+	topClients, err := c.GetTopClients(20)
+	if err != nil {
+		return fmt.Errorf("failed to get top clients: %w", err)
+	}
+
+	topQueryTypes, err := c.GetTopQueryTypes(8)
+	if err != nil {
+		return fmt.Errorf("failed to get query types: %w", err)
+	}
+
+	// Prepare stats data
+	statsData := AggregatedStatsData{
+		OverviewStats:  overviewStats,
+		TimeSeriesData: timeSeriesData,
+		TopClients:     topClients,
+		QueryTypes:     topQueryTypes,
+		UpdatedAt:      time.Now(),
+	}
+
+	// Convert to JSONB
+	statsJSON, err := json.Marshal(statsData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal stats data: %w", err)
+	}
+
+	// Store in database using upsert
+	result := c.db.WithContext(ctx).Exec(`
+		INSERT INTO aggregated_stats (stats_type, stats_data, updated_at, created_at)
+		VALUES ($1, $2::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		ON CONFLICT (stats_type) 
+		DO UPDATE SET 
+			stats_data = EXCLUDED.stats_data,
+			updated_at = CURRENT_TIMESTAMP
+	`, "dashboard", string(statsJSON))
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to store aggregated stats: %w", result.Error)
+	}
+
+	return nil
+}
+
+// GetCachedAggregatedStats retrieves cached aggregated statistics
+func (c *Client) GetCachedAggregatedStats() (*AggregatedStatsData, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Get raw database connection for direct JSONB handling
+	sqlDB, err := c.db.WithContext(ctx).DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database connection: %w", err)
+	}
+
+	type AggregatedStatsRow struct {
+		StatsData []byte    `db:"stats_data"`
+		UpdatedAt time.Time `db:"updated_at"`
+	}
+
+	var row AggregatedStatsRow
+	query := `
+		SELECT stats_data::text, updated_at
+		FROM aggregated_stats
+		WHERE stats_type = $1
+		LIMIT 1
+	`
+	err = sqlDB.QueryRowContext(ctx, query, "dashboard").Scan(&row.StatsData, &row.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get cached stats: %w", err)
+	}
+
+	// Unmarshal the JSONB data
+	var statsData AggregatedStatsData
+	if err := json.Unmarshal(row.StatsData, &statsData); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal stats data: %w", err)
+	}
+
+	statsData.UpdatedAt = row.UpdatedAt
+
+	return &statsData, nil
+}
