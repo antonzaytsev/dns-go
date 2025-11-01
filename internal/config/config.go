@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"dns-go/internal/postgres"
 )
 
 const (
@@ -141,7 +143,7 @@ func LoadFromFlags() (*Config, error) {
 		}
 	}
 
-	// Load custom DNS mappings from file if it exists
+	// Load custom DNS mappings - try PostgreSQL first, then fall back to file
 	if err := cfg.loadCustomDNS(); err != nil {
 		return nil, fmt.Errorf("failed to load custom DNS configuration: %w", err)
 	}
@@ -193,8 +195,60 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// loadCustomDNS loads custom DNS mappings from the configuration file if it exists
+// loadCustomDNS loads custom DNS mappings from PostgreSQL (if available) or from file
 func (c *Config) loadCustomDNS() error {
+	// Initialize CustomDNS map if it doesn't exist
+	if c.CustomDNS == nil {
+		c.CustomDNS = make(map[string]string)
+	}
+
+	// Try to load from PostgreSQL first if connection info is available
+	pgHost := os.Getenv("POSTGRES_HOST")
+	pgPort := os.Getenv("POSTGRES_PORT")
+	pgDB := os.Getenv("POSTGRES_DB")
+	pgUser := os.Getenv("POSTGRES_USER")
+	pgPassword := os.Getenv("POSTGRES_PASSWORD")
+
+	if pgHost != "" || pgPort != "" || pgDB != "" {
+		pgConfig := postgres.Config{
+			Host:     pgHost,
+			Port:     pgPort,
+			Database: pgDB,
+			User:     pgUser,
+			Password: pgPassword,
+		}
+
+		if pgClient, err := postgres.NewClient(pgConfig); err == nil {
+			defer pgClient.Close()
+
+			// Migrate from JSON file if needed
+			const customDNSConfigFile = "custom-dns.json"
+			if err := pgClient.MigrateDNSMappingsFromJSON(customDNSConfigFile); err != nil {
+				// Log but don't fail - migration errors are non-critical
+				fmt.Printf("Warning: Failed to migrate DNS mappings from JSON: %v\n", err)
+			}
+
+			// Load mappings from PostgreSQL
+			if mappings, err := pgClient.GetAllDNSMappings(); err == nil {
+				// PostgreSQL mappings take precedence over command line
+				for domain, ip := range mappings {
+					c.CustomDNS[domain] = ip
+				}
+				// Successfully loaded from PostgreSQL, return
+				return nil
+			} else {
+				// Failed to load from PostgreSQL, fall back to file
+				fmt.Printf("Warning: Failed to load DNS mappings from PostgreSQL: %v\n", err)
+			}
+		}
+	}
+
+	// Fall back to loading from file if PostgreSQL is not available or failed
+	return c.loadCustomDNSFromFile()
+}
+
+// loadCustomDNSFromFile loads custom DNS mappings from the configuration file if it exists
+func (c *Config) loadCustomDNSFromFile() error {
 	// Get the path to the custom DNS configuration file
 	configPath := customDNSConfigFile
 
@@ -235,11 +289,6 @@ func (c *Config) loadCustomDNS() error {
 		return fmt.Errorf("failed to parse custom DNS config file %s: %w", configPath, err)
 	}
 
-	// Initialize CustomDNS map if it doesn't exist
-	if c.CustomDNS == nil {
-		c.CustomDNS = make(map[string]string)
-	}
-
 	// Process and normalize the mappings from the config file
 	for domain, ip := range customDNSConfig.Mappings {
 		domain = strings.TrimSpace(domain)
@@ -254,7 +303,7 @@ func (c *Config) loadCustomDNS() error {
 			domain += "."
 		}
 
-		// Config file mappings take precedence over command line
+		// Config file mappings take precedence over command line (but not PostgreSQL)
 		c.CustomDNS[domain] = ip
 	}
 
@@ -293,11 +342,39 @@ func (c *Config) HasCustomDNSFileChanged() (bool, error) {
 	return fileInfo.ModTime().After(lastModTime), nil
 }
 
-// ReloadCustomDNS reloads the custom DNS configuration from file and returns the new mappings
+// ReloadCustomDNS reloads the custom DNS configuration from PostgreSQL (if available) or from file
 func (c *Config) ReloadCustomDNS() (map[string]string, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
+	// Try PostgreSQL first if available
+	pgHost := os.Getenv("POSTGRES_HOST")
+	pgPort := os.Getenv("POSTGRES_PORT")
+	pgDB := os.Getenv("POSTGRES_DB")
+	pgUser := os.Getenv("POSTGRES_USER")
+	pgPassword := os.Getenv("POSTGRES_PASSWORD")
+
+	if pgHost != "" || pgPort != "" || pgDB != "" {
+		pgConfig := postgres.Config{
+			Host:     pgHost,
+			Port:     pgPort,
+			Database: pgDB,
+			User:     pgUser,
+			Password: pgPassword,
+		}
+
+		if pgClient, err := postgres.NewClient(pgConfig); err == nil {
+			defer pgClient.Close()
+
+			if mappings, err := pgClient.GetAllDNSMappings(); err == nil {
+				// Update the config's custom DNS mappings
+				c.CustomDNS = mappings
+				return mappings, nil
+			}
+		}
+	}
+
+	// Fall back to file reload
 	// If no path is stored, nothing to reload
 	if c.customDNSPath == "" {
 		return nil, nil

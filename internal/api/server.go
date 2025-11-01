@@ -75,6 +75,14 @@ func NewServer(cfg Config) (*Server, error) {
 		if client, err := postgres.NewClient(pgConfig); err == nil {
 			pgClient = client
 			fmt.Println("✅ PostgreSQL client initialized successfully")
+
+			// Migrate DNS mappings from JSON file to PostgreSQL if needed
+			const customDNSConfigFile = "custom-dns.json"
+			if err := pgClient.MigrateDNSMappingsFromJSON(customDNSConfigFile); err != nil {
+				fmt.Printf("⚠️  Warning: Failed to migrate DNS mappings from JSON: %v\n", err)
+			} else {
+				fmt.Println("✅ DNS mappings migration completed")
+			}
 		} else {
 			fmt.Printf("⚠️  Warning: Failed to initialize PostgreSQL client: %v\n", err)
 		}
@@ -507,24 +515,36 @@ func (s *Server) handleLogCounts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDNSMappings(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// If no DNS config is available, return an error
-	if s.config == nil {
-		http.Error(w, "DNS configuration not available", http.StatusServiceUnavailable)
+	// Require PostgreSQL client for DNS mappings
+	if s.pgClient == nil {
+		http.Error(w, "PostgreSQL not connected", http.StatusServiceUnavailable)
 		return
 	}
 
 	switch r.Method {
 	case http.MethodGet:
-		// Return current DNS mappings
-		mappings := s.config.GetCustomDNS()
+		// Return current DNS mappings from PostgreSQL
+		mappings, err := s.pgClient.GetAllDNSMappings()
+		if err != nil {
+			http.Error(w, "Failed to get DNS mappings: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Remove trailing dots from domains for display (user-friendly format)
+		displayMappings := make(map[string]string)
+		for domain, ip := range mappings {
+			displayDomain := strings.TrimSuffix(domain, ".")
+			displayMappings[displayDomain] = ip
+		}
+
 		response := map[string]interface{}{
-			"mappings": mappings,
-			"count":    len(mappings),
+			"mappings": displayMappings,
+			"count":    len(displayMappings),
 		}
 		json.NewEncoder(w).Encode(response)
 
 	case http.MethodPost:
-		// Add a single DNS mapping (create only, not update)
+		// Add a single DNS mapping
 		var requestBody struct {
 			Domain string `json:"domain"`
 			IP     string `json:"ip"`
@@ -555,29 +575,36 @@ func (s *Server) handleDNSMappings(w http.ResponseWriter, r *http.Request) {
 			domain += "."
 		}
 
-		// Get current mappings and check if domain already exists
-		currentMappings := s.config.GetCustomDNS()
-		if _, exists := currentMappings[domain]; exists {
+		// Check if domain already exists
+		existingMappings, err := s.pgClient.GetAllDNSMappings()
+		if err != nil {
+			http.Error(w, "Failed to check existing mappings: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if _, exists := existingMappings[domain]; exists {
 			http.Error(w, "Domain mapping already exists. Delete first to update.", http.StatusConflict)
 			return
 		}
 
-		// Add the new mapping
-		currentMappings[domain] = ip
-
-		// Save to config file
-		if err := s.saveDNSMappings(currentMappings); err != nil {
-			http.Error(w, "Failed to save DNS mappings: "+err.Error(), http.StatusInternalServerError)
+		// Create the mapping in PostgreSQL
+		if err := s.pgClient.CreateDNSMapping(domain, ip); err != nil {
+			http.Error(w, "Failed to create DNS mapping: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		// Update in-memory config
-		s.config.CustomDNS = currentMappings
+		// Update in-memory config if available
+		if s.config != nil {
+			if s.config.CustomDNS == nil {
+				s.config.CustomDNS = make(map[string]string)
+			}
+			s.config.CustomDNS[domain] = ip
+		}
 
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"message": "DNS mapping added successfully",
-			"domain":  domain,
+			"domain":  strings.TrimSuffix(domain, "."),
 			"ip":      ip,
 		})
 
@@ -594,63 +621,30 @@ func (s *Server) handleDNSMappings(w http.ResponseWriter, r *http.Request) {
 			domain += "."
 		}
 
-		// Get current mappings and remove the specified domain
-		currentMappings := s.config.GetCustomDNS()
-		if _, exists := currentMappings[domain]; !exists {
-			http.Error(w, "Domain mapping not found", http.StatusNotFound)
+		// Delete from PostgreSQL
+		if err := s.pgClient.DeleteDNSMapping(domain); err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				http.Error(w, "Domain mapping not found", http.StatusNotFound)
+			} else {
+				http.Error(w, "Failed to delete DNS mapping: "+err.Error(), http.StatusInternalServerError)
+			}
 			return
 		}
 
-		delete(currentMappings, domain)
-
-		// Save to config file
-		if err := s.saveDNSMappings(currentMappings); err != nil {
-			http.Error(w, "Failed to save DNS mappings: "+err.Error(), http.StatusInternalServerError)
-			return
+		// Update in-memory config if available
+		if s.config != nil && s.config.CustomDNS != nil {
+			delete(s.config.CustomDNS, domain)
 		}
-
-		// Update in-memory config
-		s.config.CustomDNS = currentMappings
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"message": "DNS mapping deleted successfully",
-			"domain":  domain,
+			"domain":  strings.TrimSuffix(domain, "."),
 		})
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
-}
-
-// saveDNSMappings saves the DNS mappings to the custom-dns.json file
-func (s *Server) saveDNSMappings(mappings map[string]string) error {
-	// Create the structure that matches the JSON file format
-	configData := struct {
-		Mappings map[string]string `json:"mappings"`
-	}{
-		Mappings: make(map[string]string),
-	}
-
-	// Remove trailing dots from domains for file storage (user-friendly format)
-	for domain, ip := range mappings {
-		displayDomain := strings.TrimSuffix(domain, ".")
-		configData.Mappings[displayDomain] = ip
-	}
-
-	// Convert to JSON
-	jsonData, err := json.MarshalIndent(configData, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal JSON: %w", err)
-	}
-
-	// Write to the custom-dns.json file
-	configFile := "custom-dns.json"
-	if err := os.WriteFile(configFile, jsonData, 0644); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-
-	return nil
 }
 
 // Middleware

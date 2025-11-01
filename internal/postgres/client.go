@@ -9,10 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"dns-go/internal/migrations"
 	"dns-go/internal/types"
 
-	"github.com/lib/pq"
-	_ "github.com/lib/pq"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 const (
@@ -25,7 +26,7 @@ const (
 
 // Client wraps the PostgreSQL client with DNS-specific functionality
 type Client struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
 // Config holds PostgreSQL configuration
@@ -37,7 +38,7 @@ type Config struct {
 	Password string
 }
 
-// NewClient creates a new PostgreSQL client
+// NewClient creates a new PostgreSQL client using GORM
 func NewClient(cfg Config) (*Client, error) {
 	host := getEnvOrDefault("POSTGRES_HOST", cfg.Host)
 	if host == "" {
@@ -64,36 +65,25 @@ func NewClient(cfg Config) (*Client, error) {
 		password = DefaultPassword
 	}
 
-	// First, try to connect to the target database
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		host, port, user, password, database)
+	// Build DSN for GORM
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=UTC",
+		host, user, password, database, port)
 
-	db, err := sql.Open("postgres", dsn)
+	// Try to connect to the target database
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database connection: %w", err)
-	}
-
-	client := &Client{
-		db: db,
-	}
-
-	// Test connection
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := client.db.PingContext(ctx); err != nil {
 		// If connection fails, try to create the database
-		client.db.Close()
-
-		// Connect to default 'postgres' database to create the target database
-		defaultDSN := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=postgres sslmode=disable",
-			host, port, user, password)
+		defaultDSN := fmt.Sprintf("host=%s user=%s password=%s dbname=postgres port=%s sslmode=disable TimeZone=UTC",
+			host, user, password, port)
 
 		defaultDB, err := sql.Open("postgres", defaultDSN)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open connection to default database: %w", err)
 		}
 		defer defaultDB.Close()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 
 		// Test connection to default database
 		if err := defaultDB.PingContext(ctx); err != nil {
@@ -108,34 +98,28 @@ func NewClient(cfg Config) (*Client, error) {
 
 		if !dbExistsCheck {
 			// Create the database if it doesn't exist
-			// Use pq.QuoteIdentifier for safe SQL identifier quoting
-			quotedDB := pq.QuoteIdentifier(database)
+			quotedDB := fmt.Sprintf(`"%s"`, strings.ReplaceAll(database, `"`, `""`))
 			createDBSQL := fmt.Sprintf("CREATE DATABASE %s", quotedDB)
 			_, err = defaultDB.ExecContext(ctx, createDBSQL)
 			if err != nil {
-				// Check if error is because database already exists (race condition)
 				if !isDatabaseExistsError(err) {
 					return nil, fmt.Errorf("failed to create database %s: %w", database, err)
 				}
-				// Database might have been created between our attempts, continue
 			}
 		}
 
 		// Now connect to the newly created database
-		db, err = sql.Open("postgres", dsn)
+		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to open database connection after creation: %w", err)
 		}
-
-		client.db = db
-
-		// Test connection again
-		if err := client.db.PingContext(ctx); err != nil {
-			return nil, fmt.Errorf("failed to ping database after creation: %w", err)
-		}
 	}
 
-	// Create table and indices if they don't exist
+	client := &Client{
+		db: db,
+	}
+
+	// Run migrations using GORM AutoMigrate
 	if err := client.initialize(); err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
@@ -149,75 +133,246 @@ func isDatabaseExistsError(err error) bool {
 		return false
 	}
 	errStr := strings.ToLower(err.Error())
-	// PostgreSQL error codes: 42P04 = duplicate_database
 	return strings.Contains(errStr, "already exists") ||
 		strings.Contains(errStr, "duplicate_database") ||
 		strings.Contains(errStr, "42p04")
 }
 
-// initialize creates the table and indices if they don't exist
+// initialize runs database migrations and ensures models are up to date
 func (c *Client) initialize() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	createTableSQL := `
-	CREATE TABLE IF NOT EXISTS dns_logs (
-		id SERIAL PRIMARY KEY,
-		uuid VARCHAR(255) UNIQUE NOT NULL,
-		timestamp TIMESTAMP NOT NULL,
-		client_ip INET NOT NULL,
-		query VARCHAR(255) NOT NULL,
-		query_type VARCHAR(10) NOT NULL,
-		query_id INTEGER,
-		status VARCHAR(50) NOT NULL,
-		cache_hit BOOLEAN DEFAULT FALSE,
-		duration_ms DOUBLE PRECISION,
-		response_upstream VARCHAR(255),
-		response_rcode VARCHAR(10),
-		response_answer_count INTEGER,
-		response_rtt_ms DOUBLE PRECISION,
-		upstreams JSONB,
-		answers JSONB,
-		ip_addresses INET[],
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);
-	`
-
-	if _, err := c.db.ExecContext(ctx, createTableSQL); err != nil {
-		return fmt.Errorf("failed to create table: %w", err)
+	// Check and run file-based migrations first
+	migrator := migrations.NewMigrator(c.db)
+	if err := migrator.Run(ctx); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 
-	// Create indices for efficient aggregation queries
-	indices := []string{
-		// Time-based indices for aggregation (minute, hour, day, week)
-		"CREATE INDEX IF NOT EXISTS idx_dns_logs_timestamp ON dns_logs(timestamp)",
-		"CREATE INDEX IF NOT EXISTS idx_dns_logs_timestamp_date ON dns_logs(DATE_TRUNC('day', timestamp))",
-		"CREATE INDEX IF NOT EXISTS idx_dns_logs_timestamp_hour ON dns_logs(DATE_TRUNC('hour', timestamp))",
-		"CREATE INDEX IF NOT EXISTS idx_dns_logs_timestamp_minute ON dns_logs(DATE_TRUNC('minute', timestamp))",
-
-		// Client IP index for client-based aggregation
-		"CREATE INDEX IF NOT EXISTS idx_dns_logs_client_ip ON dns_logs(client_ip)",
-
-		// Composite indices for common queries
-		"CREATE INDEX IF NOT EXISTS idx_dns_logs_timestamp_client ON dns_logs(timestamp, client_ip)",
-		"CREATE INDEX IF NOT EXISTS idx_dns_logs_status ON dns_logs(status)",
-		"CREATE INDEX IF NOT EXISTS idx_dns_logs_cache_hit ON dns_logs(cache_hit)",
-		"CREATE INDEX IF NOT EXISTS idx_dns_logs_query_type ON dns_logs(query_type)",
-
-		// UUID index for lookups
-		"CREATE INDEX IF NOT EXISTS idx_dns_logs_uuid ON dns_logs(uuid)",
-
-		// Indices for search queries (ILIKE performance)
-		"CREATE INDEX IF NOT EXISTS idx_dns_logs_query ON dns_logs(query)",
-		"CREATE INDEX IF NOT EXISTS idx_dns_logs_response_upstream ON dns_logs(response_upstream)",
-	}
-
-	for _, indexSQL := range indices {
-		if _, err := c.db.ExecContext(ctx, indexSQL); err != nil {
-			return fmt.Errorf("failed to create index: %w", err)
+	// Then run GORM AutoMigrate to ensure models match current code
+	// This handles any schema changes that might be needed
+	if err := c.db.WithContext(ctx).AutoMigrate(&DNSLog{}, &DNSMapping{}); err != nil {
+		// If AutoMigrate fails on constraint issues with existing tables, continue
+		if strings.Contains(err.Error(), "constraint") || strings.Contains(err.Error(), "does not exist") {
+			fmt.Printf("⚠️  Warning: AutoMigrate encountered constraint issues (tables exist, continuing): %v\n", err)
+			// Verify tables exist
+			if !c.db.Migrator().HasTable(&DNSLog{}) || !c.db.Migrator().HasTable(&DNSMapping{}) {
+				return fmt.Errorf("required tables missing after migration: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to run auto migrate: %w", err)
 		}
 	}
 
+	return nil
+}
+
+// toDNSLog converts types.LogEntry to DNSLog model
+func toDNSLog(entry types.LogEntry) *DNSLog {
+	clientIP := types.ExtractIPFromAddr(entry.Request.Client)
+
+	// Convert upstreams to JSONB (as array)
+	upstreamsJSON := make(JSONB, len(entry.Upstreams))
+	for i, upstream := range entry.Upstreams {
+		upstreamData := map[string]interface{}{
+			"server":   upstream.Server,
+			"attempt":  upstream.Attempt,
+			"duration": upstream.Duration,
+		}
+		if upstream.Error != nil {
+			upstreamData["error"] = *upstream.Error
+		}
+		if upstream.RTT != nil {
+			upstreamData["rtt_ms"] = *upstream.RTT
+		}
+		upstreamsJSON[i] = upstreamData
+	}
+
+	// Convert answers to JSONB (as array)
+	answersJSON := make(JSONB, len(entry.Answers))
+	for i, answer := range entry.Answers {
+		answersJSON[i] = answer
+	}
+
+	queryID := int(entry.Request.ID)
+	durationMs := entry.Duration
+
+	log := &DNSLog{
+		UUID:        entry.UUID,
+		Timestamp:   entry.Timestamp,
+		ClientIP:    clientIP,
+		Query:       entry.Request.Query,
+		QueryType:   entry.Request.Type,
+		QueryID:     &queryID,
+		Status:      entry.Status,
+		CacheHit:    entry.CacheHit,
+		DurationMs:  &durationMs,
+		Upstreams:   upstreamsJSON,
+		Answers:     answersJSON,
+		IPAddresses: StringArray(entry.IPAddresses),
+	}
+
+	if entry.Response != nil {
+		log.ResponseUpstream = &entry.Response.Upstream
+		log.ResponseRcode = &entry.Response.Rcode
+		answerCount := entry.Response.AnswerCount
+		log.ResponseAnswerCount = &answerCount
+		rtt := entry.Response.RTT
+		log.ResponseRTTMs = &rtt
+	}
+
+	return log
+}
+
+// toLogEntry converts DNSLog model to types.LogEntry
+func toLogEntry(log *DNSLog) types.LogEntry {
+	entry := types.LogEntry{
+		Timestamp: log.Timestamp,
+		UUID:      log.UUID,
+		Request: types.RequestInfo{
+			Client: log.ClientIP,
+			Query:  log.Query,
+			Type:   log.QueryType,
+		},
+		Status:   log.Status,
+		CacheHit: log.CacheHit,
+	}
+
+	if log.QueryID != nil {
+		entry.Request.ID = uint16(*log.QueryID)
+	}
+
+	if log.DurationMs != nil {
+		entry.Duration = *log.DurationMs
+	}
+
+	// Convert JSONB upstreams back to []UpstreamAttempt
+	if log.Upstreams != nil && len(log.Upstreams) > 0 {
+		upstreams := make([]types.UpstreamAttempt, 0, len(log.Upstreams))
+		for _, val := range log.Upstreams {
+			if data, ok := val.(map[string]interface{}); ok {
+				attempt := types.UpstreamAttempt{
+					Server:   getString(data, "server"),
+					Attempt:  getInt(data, "attempt"),
+					Duration: getFloat64(data, "duration"),
+				}
+				if errStr := getStringPtr(data, "error"); errStr != nil {
+					attempt.Error = errStr
+				}
+				if rtt := getFloat64Ptr(data, "rtt_ms"); rtt != nil {
+					attempt.RTT = rtt
+				}
+				upstreams = append(upstreams, attempt)
+			}
+		}
+		entry.Upstreams = upstreams
+	}
+
+	// Convert JSONB answers back to [][]string
+	if log.Answers != nil && len(log.Answers) > 0 {
+		answers := make([][]string, 0, len(log.Answers))
+		for _, val := range log.Answers {
+			if arr, ok := val.([]interface{}); ok {
+				strArr := make([]string, 0, len(arr))
+				for _, v := range arr {
+					if str, ok := v.(string); ok {
+						strArr = append(strArr, str)
+					}
+				}
+				answers = append(answers, strArr)
+			} else if arr, ok := val.([]string); ok {
+				answers = append(answers, arr)
+			}
+		}
+		entry.Answers = answers
+	}
+
+	// Convert StringArray to []string
+	if log.IPAddresses != nil {
+		entry.IPAddresses = []string(log.IPAddresses)
+	}
+
+	// Set Response if available
+	if log.ResponseUpstream != nil {
+		entry.Response = &types.ResponseInfo{
+			Upstream: *log.ResponseUpstream,
+		}
+		if log.ResponseRcode != nil {
+			entry.Response.Rcode = *log.ResponseRcode
+		}
+		if log.ResponseAnswerCount != nil {
+			entry.Response.AnswerCount = *log.ResponseAnswerCount
+		}
+		if log.ResponseRTTMs != nil {
+			entry.Response.RTT = *log.ResponseRTTMs
+		}
+	}
+
+	return entry
+}
+
+// Helper functions for type conversion
+func getString(m map[string]interface{}, key string) string {
+	if val, ok := m[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
+}
+
+func getStringPtr(m map[string]interface{}, key string) *string {
+	if val, ok := m[key]; ok {
+		if str, ok := val.(string); ok {
+			return &str
+		}
+	}
+	return nil
+}
+
+func getInt(m map[string]interface{}, key string) int {
+	if val, ok := m[key]; ok {
+		switch v := val.(type) {
+		case int:
+			return v
+		case float64:
+			return int(v)
+		case int64:
+			return int(v)
+		}
+	}
+	return 0
+}
+
+func getFloat64(m map[string]interface{}, key string) float64 {
+	if val, ok := m[key]; ok {
+		switch v := val.(type) {
+		case float64:
+			return v
+		case int:
+			return float64(v)
+		case int64:
+			return float64(v)
+		}
+	}
+	return 0
+}
+
+func getFloat64Ptr(m map[string]interface{}, key string) *float64 {
+	if val, ok := m[key]; ok {
+		var f float64
+		switch v := val.(type) {
+		case float64:
+			f = v
+		case int:
+			f = float64(v)
+		case int64:
+			f = float64(v)
+		default:
+			return nil
+		}
+		return &f
+	}
 	return nil
 }
 
@@ -226,69 +381,12 @@ func (c *Client) InsertLogEntry(entry types.LogEntry) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	clientIP := types.ExtractIPFromAddr(entry.Request.Client)
+	log := toDNSLog(entry)
 
-	// Convert upstreams to JSONB
-	upstreamsJSON, err := json.Marshal(entry.Upstreams)
-	if err != nil {
-		return fmt.Errorf("failed to marshal upstreams: %w", err)
-	}
-
-	// Convert answers to JSONB
-	answersJSON, err := json.Marshal(entry.Answers)
-	if err != nil {
-		return fmt.Errorf("failed to marshal answers: %w", err)
-	}
-
-	// Convert IP addresses array - use pq.Array for proper PostgreSQL array handling
-	var ipAddressesArray interface{}
-	if len(entry.IPAddresses) > 0 {
-		ipAddressesArray = pq.Array(entry.IPAddresses)
-	}
-
-	// Prepare SQL statement
-	insertSQL := `
-	INSERT INTO dns_logs (
-		uuid, timestamp, client_ip, query, query_type, query_id,
-		status, cache_hit, duration_ms,
-		response_upstream, response_rcode, response_answer_count, response_rtt_ms,
-		upstreams, answers, ip_addresses
-	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-	ON CONFLICT (uuid) DO NOTHING;
-	`
-
-	var responseUpstream, responseRcode sql.NullString
-	var responseAnswerCount sql.NullInt32
-	var responseRTT sql.NullFloat64
-
-	if entry.Response != nil {
-		responseUpstream = sql.NullString{String: entry.Response.Upstream, Valid: true}
-		responseRcode = sql.NullString{String: entry.Response.Rcode, Valid: true}
-		responseAnswerCount = sql.NullInt32{Int32: int32(entry.Response.AnswerCount), Valid: true}
-		responseRTT = sql.NullFloat64{Float64: entry.Response.RTT, Valid: true}
-	}
-
-	_, err = c.db.ExecContext(ctx, insertSQL,
-		entry.UUID,
-		entry.Timestamp,
-		clientIP,
-		entry.Request.Query,
-		entry.Request.Type,
-		entry.Request.ID,
-		entry.Status,
-		entry.CacheHit,
-		entry.Duration,
-		responseUpstream,
-		responseRcode,
-		responseAnswerCount,
-		responseRTT,
-		upstreamsJSON,
-		answersJSON,
-		ipAddressesArray,
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to insert log entry: %w", err)
+	// Use GORM's FirstOrCreate to handle ON CONFLICT (do nothing if exists)
+	result := c.db.WithContext(ctx).Where("uuid = ?", log.UUID).FirstOrCreate(log)
+	if result.Error != nil {
+		return fmt.Errorf("failed to insert log entry: %w", result.Error)
 	}
 
 	return nil
@@ -305,141 +403,43 @@ func (c *Client) SearchLogs(searchTerm string, limit, offset int, since *time.Ti
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	var whereClauses []string
-	var args []interface{}
-	argIndex := 1
+	query := c.db.WithContext(ctx).Model(&DNSLog{})
 
-	// Build WHERE clause based on search term
+	// Build WHERE conditions based on search term
 	if searchTerm != "" {
-		// Check if search term looks like an IP address or partial IP
 		searchPattern := "%" + searchTerm + "%"
-		whereClause := fmt.Sprintf(`(
-			query ILIKE $%d OR
-			client_ip::text ILIKE $%d OR
-			query_type ILIKE $%d OR
-			status ILIKE $%d OR
-			response_upstream ILIKE $%d OR
-			uuid = $%d`,
-			argIndex, argIndex, argIndex, argIndex, argIndex, argIndex)
+		query = query.Where(
+			"query ILIKE ? OR client_ip::text ILIKE ? OR query_type ILIKE ? OR status ILIKE ? OR response_upstream ILIKE ? OR uuid = ?",
+			searchPattern, searchPattern, searchPattern, searchPattern, searchPattern, searchTerm,
+		)
 
-		// Add IP address array search if search term contains dots or numbers
+		// Add IP address array search if search term looks like IP
 		if strings.Contains(searchTerm, ".") || (len(searchTerm) > 0 && searchTerm[0] >= '0' && searchTerm[0] <= '9') {
-			whereClause += fmt.Sprintf(` OR EXISTS (
-				SELECT 1 FROM unnest(ip_addresses) AS ip WHERE ip::text ILIKE $%d
-			)`, argIndex)
+			query = query.Or("EXISTS (SELECT 1 FROM unnest(ip_addresses) AS ip WHERE ip::text ILIKE ?)", searchPattern)
 		}
-		whereClause += ")"
-
-		whereClauses = append(whereClauses, whereClause)
-		args = append(args, searchPattern)
-		argIndex++
 	}
 
 	// Add time filter if specified
 	if since != nil {
-		whereClauses = append(whereClauses, fmt.Sprintf("timestamp >= $%d AND timestamp <= $%d", argIndex, argIndex+1))
-		args = append(args, *since, time.Now())
-		argIndex += 2
-	}
-
-	whereSQL := ""
-	if len(whereClauses) > 0 {
-		whereSQL = "WHERE " + fmt.Sprintf("(%s)", whereClauses[0])
-		for i := 1; i < len(whereClauses); i++ {
-			whereSQL += " AND " + whereClauses[i]
-		}
+		query = query.Where("timestamp >= ? AND timestamp <= ?", *since, time.Now())
 	}
 
 	// Count total results
-	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM dns_logs %s", whereSQL)
 	var total int64
-	if err := c.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+	if err := query.Count(&total).Error; err != nil {
 		return nil, fmt.Errorf("failed to count results: %w", err)
 	}
 
 	// Fetch paginated results
-	selectSQL := fmt.Sprintf(`
-		SELECT uuid, timestamp, client_ip, query, query_type, query_id,
-			status, cache_hit, duration_ms,
-			response_upstream, response_rcode, response_answer_count, response_rtt_ms,
-			upstreams, answers, ip_addresses
-		FROM dns_logs
-		%s
-		ORDER BY timestamp DESC
-		LIMIT $%d OFFSET $%d
-	`, whereSQL, argIndex, argIndex+1)
-
-	args = append(args, limit, offset)
-
-	rows, err := c.db.QueryContext(ctx, selectSQL, args...)
-	if err != nil {
+	var logs []DNSLog
+	if err := query.Order("timestamp DESC").Limit(limit).Offset(offset).Find(&logs).Error; err != nil {
 		return nil, fmt.Errorf("failed to query logs: %w", err)
 	}
-	defer rows.Close()
 
-	var results []types.LogEntry
-	for rows.Next() {
-		var entry types.LogEntry
-		var clientIP string
-		var upstreamsJSON, answersJSON []byte
-		var ipAddressesArray pq.StringArray
-		var responseUpstream, responseRcode sql.NullString
-		var responseAnswerCount sql.NullInt32
-		var responseRTT sql.NullFloat64
-
-		err := rows.Scan(
-			&entry.UUID,
-			&entry.Timestamp,
-			&clientIP,
-			&entry.Request.Query,
-			&entry.Request.Type,
-			&entry.Request.ID,
-			&entry.Status,
-			&entry.CacheHit,
-			&entry.Duration,
-			&responseUpstream,
-			&responseRcode,
-			&responseAnswerCount,
-			&responseRTT,
-			&upstreamsJSON,
-			&answersJSON,
-			&ipAddressesArray,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-
-		// Reconstruct entry
-		entry.Request.Client = clientIP
-		if responseUpstream.Valid {
-			entry.Response = &types.ResponseInfo{
-				Upstream:    responseUpstream.String,
-				Rcode:       responseRcode.String,
-				AnswerCount: int(responseAnswerCount.Int32),
-				RTT:         responseRTT.Float64,
-			}
-		}
-
-		if err := json.Unmarshal(upstreamsJSON, &entry.Upstreams); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal upstreams: %w", err)
-		}
-
-		if err := json.Unmarshal(answersJSON, &entry.Answers); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal answers: %w", err)
-		}
-
-		// Convert pq.StringArray to []string
-		if ipAddressesArray != nil {
-			entry.IPAddresses = []string(ipAddressesArray)
-		} else {
-			entry.IPAddresses = []string{}
-		}
-
-		results = append(results, entry)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("row iteration error: %w", err)
+	// Convert to LogEntry
+	results := make([]types.LogEntry, len(logs))
+	for i, log := range logs {
+		results[i] = toLogEntry(&log)
 	}
 
 	return &SearchResult{
@@ -454,8 +454,7 @@ func (c *Client) GetLogCount() (int64, error) {
 	defer cancel()
 
 	var count int64
-	err := c.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM dns_logs").Scan(&count)
-	if err != nil {
+	if err := c.db.WithContext(ctx).Model(&DNSLog{}).Count(&count).Error; err != nil {
 		return 0, fmt.Errorf("failed to count logs: %w", err)
 	}
 
@@ -476,7 +475,8 @@ func (c *Client) GetTimeSeriesData() (map[string][]TimeSeriesPoint, error) {
 	result := make(map[string][]TimeSeriesPoint)
 
 	// Last hour - per minute (75 minutes)
-	hourSQL := `
+	var hourData []TimeSeriesPoint
+	if err := c.db.WithContext(ctx).Raw(`
 		SELECT 
 			EXTRACT(EPOCH FROM DATE_TRUNC('minute', timestamp))::BIGINT as ts,
 			COUNT(*)::BIGINT as count
@@ -485,25 +485,14 @@ func (c *Client) GetTimeSeriesData() (map[string][]TimeSeriesPoint, error) {
 		GROUP BY DATE_TRUNC('minute', timestamp)
 		ORDER BY ts ASC
 		LIMIT 75
-	`
-	rows, err := c.db.QueryContext(ctx, hourSQL)
-	if err != nil {
+	`).Scan(&hourData).Error; err != nil {
 		return nil, fmt.Errorf("failed to query hourly data: %w", err)
-	}
-	defer rows.Close()
-
-	var hourData []TimeSeriesPoint
-	for rows.Next() {
-		var point TimeSeriesPoint
-		if err := rows.Scan(&point.Timestamp, &point.Value); err != nil {
-			return nil, fmt.Errorf("failed to scan hour data: %w", err)
-		}
-		hourData = append(hourData, point)
 	}
 	result["requests_last_hour"] = hourData
 
 	// Last day - per hour (75 hours)
-	daySQL := `
+	var dayData []TimeSeriesPoint
+	if err := c.db.WithContext(ctx).Raw(`
 		SELECT 
 			EXTRACT(EPOCH FROM DATE_TRUNC('hour', timestamp))::BIGINT as ts,
 			COUNT(*)::BIGINT as count
@@ -512,25 +501,14 @@ func (c *Client) GetTimeSeriesData() (map[string][]TimeSeriesPoint, error) {
 		GROUP BY DATE_TRUNC('hour', timestamp)
 		ORDER BY ts ASC
 		LIMIT 75
-	`
-	rows, err = c.db.QueryContext(ctx, daySQL)
-	if err != nil {
+	`).Scan(&dayData).Error; err != nil {
 		return nil, fmt.Errorf("failed to query daily data: %w", err)
-	}
-	defer rows.Close()
-
-	var dayData []TimeSeriesPoint
-	for rows.Next() {
-		var point TimeSeriesPoint
-		if err := rows.Scan(&point.Timestamp, &point.Value); err != nil {
-			return nil, fmt.Errorf("failed to scan day data: %w", err)
-		}
-		dayData = append(dayData, point)
 	}
 	result["requests_last_day"] = dayData
 
 	// Last week - per day (75 days)
-	weekSQL := `
+	var weekData []TimeSeriesPoint
+	if err := c.db.WithContext(ctx).Raw(`
 		SELECT 
 			EXTRACT(EPOCH FROM DATE_TRUNC('day', timestamp))::BIGINT as ts,
 			COUNT(*)::BIGINT as count
@@ -539,25 +517,14 @@ func (c *Client) GetTimeSeriesData() (map[string][]TimeSeriesPoint, error) {
 		GROUP BY DATE_TRUNC('day', timestamp)
 		ORDER BY ts ASC
 		LIMIT 75
-	`
-	rows, err = c.db.QueryContext(ctx, weekSQL)
-	if err != nil {
+	`).Scan(&weekData).Error; err != nil {
 		return nil, fmt.Errorf("failed to query weekly data: %w", err)
-	}
-	defer rows.Close()
-
-	var weekData []TimeSeriesPoint
-	for rows.Next() {
-		var point TimeSeriesPoint
-		if err := rows.Scan(&point.Timestamp, &point.Value); err != nil {
-			return nil, fmt.Errorf("failed to scan week data: %w", err)
-		}
-		weekData = append(weekData, point)
 	}
 	result["requests_last_week"] = weekData
 
 	// Last month - per day (75 days)
-	monthSQL := `
+	var monthData []TimeSeriesPoint
+	if err := c.db.WithContext(ctx).Raw(`
 		SELECT 
 			EXTRACT(EPOCH FROM DATE_TRUNC('day', timestamp))::BIGINT as ts,
 			COUNT(*)::BIGINT as count
@@ -566,20 +533,8 @@ func (c *Client) GetTimeSeriesData() (map[string][]TimeSeriesPoint, error) {
 		GROUP BY DATE_TRUNC('day', timestamp)
 		ORDER BY ts ASC
 		LIMIT 75
-	`
-	rows, err = c.db.QueryContext(ctx, monthSQL)
-	if err != nil {
+	`).Scan(&monthData).Error; err != nil {
 		return nil, fmt.Errorf("failed to query monthly data: %w", err)
-	}
-	defer rows.Close()
-
-	var monthData []TimeSeriesPoint
-	for rows.Next() {
-		var point TimeSeriesPoint
-		if err := rows.Scan(&point.Timestamp, &point.Value); err != nil {
-			return nil, fmt.Errorf("failed to scan month data: %w", err)
-		}
-		monthData = append(monthData, point)
 	}
 	result["requests_last_month"] = monthData
 
@@ -600,7 +555,16 @@ func (c *Client) GetTopClients(limit int) ([]ClientMetric, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	sql := `
+	type ClientAggregate struct {
+		ClientIP      string    `gorm:"column:client_ip"`
+		TotalRequests int64     `gorm:"column:total_requests"`
+		CacheHits     int64     `gorm:"column:cache_hits"`
+		Successful    int64     `gorm:"column:successful"`
+		LastSeen      time.Time `gorm:"column:last_seen"`
+	}
+
+	var aggregates []ClientAggregate
+	if err := c.db.WithContext(ctx).Raw(`
 		SELECT 
 			client_ip,
 			COUNT(*)::BIGINT as total_requests,
@@ -610,32 +574,22 @@ func (c *Client) GetTopClients(limit int) ([]ClientMetric, error) {
 		FROM dns_logs
 		GROUP BY client_ip
 		ORDER BY total_requests DESC
-		LIMIT $1
-	`
-
-	rows, err := c.db.QueryContext(ctx, sql, limit)
-	if err != nil {
+		LIMIT ?
+	`, limit).Scan(&aggregates).Error; err != nil {
 		return nil, fmt.Errorf("failed to query top clients: %w", err)
 	}
-	defer rows.Close()
 
-	var clients []ClientMetric
-	for rows.Next() {
-		var client ClientMetric
-		var totalRequests, cacheHits, successful int64
-
-		err := rows.Scan(&client.IP, &totalRequests, &cacheHits, &successful, &client.LastSeen)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan client data: %w", err)
+	clients := make([]ClientMetric, len(aggregates))
+	for i, agg := range aggregates {
+		clients[i] = ClientMetric{
+			IP:       agg.ClientIP,
+			Requests: agg.TotalRequests,
+			LastSeen: agg.LastSeen,
 		}
-
-		client.Requests = totalRequests
-		if totalRequests > 0 {
-			client.CacheHitRate = float64(cacheHits) / float64(totalRequests) * 100
-			client.SuccessRate = float64(successful) / float64(totalRequests) * 100
+		if agg.TotalRequests > 0 {
+			clients[i].CacheHitRate = float64(agg.CacheHits) / float64(agg.TotalRequests) * 100
+			clients[i].SuccessRate = float64(agg.Successful) / float64(agg.TotalRequests) * 100
 		}
-
-		clients = append(clients, client)
 	}
 
 	return clients, nil
@@ -652,29 +606,30 @@ func (c *Client) GetTopQueryTypes(limit int) ([]QueryTypeMetric, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	sql := `
+	type QueryTypeAggregate struct {
+		QueryType string `gorm:"column:query_type"`
+		Count     int64  `gorm:"column:count"`
+	}
+
+	var aggregates []QueryTypeAggregate
+	if err := c.db.WithContext(ctx).Raw(`
 		SELECT 
 			query_type,
 			COUNT(*)::BIGINT as count
 		FROM dns_logs
 		GROUP BY query_type
 		ORDER BY count DESC
-		LIMIT $1
-	`
-
-	rows, err := c.db.QueryContext(ctx, sql, limit)
-	if err != nil {
+		LIMIT ?
+	`, limit).Scan(&aggregates).Error; err != nil {
 		return nil, fmt.Errorf("failed to query query types: %w", err)
 	}
-	defer rows.Close()
 
-	var queryTypes []QueryTypeMetric
-	for rows.Next() {
-		var qt QueryTypeMetric
-		if err := rows.Scan(&qt.Type, &qt.Count); err != nil {
-			return nil, fmt.Errorf("failed to scan query type data: %w", err)
+	queryTypes := make([]QueryTypeMetric, len(aggregates))
+	for i, agg := range aggregates {
+		queryTypes[i] = QueryTypeMetric{
+			Type:  agg.QueryType,
+			Count: agg.Count,
 		}
-		queryTypes = append(queryTypes, qt)
 	}
 
 	return queryTypes, nil
@@ -696,38 +651,43 @@ func (c *Client) GetOverviewStats() (*OverviewStats, error) {
 
 	stats := &OverviewStats{}
 
-	// Get total requests, cache hits, and average response time
-	sql := `
+	type StatsAggregate struct {
+		TotalRequests   int64           `gorm:"column:total_requests"`
+		CacheHits       int64           `gorm:"column:cache_hits"`
+		Successful      int64           `gorm:"column:successful"`
+		AvgResponseTime sql.NullFloat64 `gorm:"column:avg_response_time"`
+	}
+
+	var agg StatsAggregate
+	if err := c.db.WithContext(ctx).Raw(`
 		SELECT 
 			COUNT(*)::BIGINT as total_requests,
 			COUNT(*) FILTER (WHERE cache_hit = true)::BIGINT as cache_hits,
 			COUNT(*) FILTER (WHERE status = 'success' OR status = 'cache_hit')::BIGINT as successful,
 			AVG(duration_ms) as avg_response_time
 		FROM dns_logs
-	`
-
-	err := c.db.QueryRowContext(ctx, sql).Scan(
-		&stats.TotalRequests,
-		&stats.CacheHits,
-		&stats.SuccessfulQueries,
-		&stats.AverageResponseTime,
-	)
-	if err != nil {
+	`).Scan(&agg).Error; err != nil {
 		return nil, fmt.Errorf("failed to query overview stats: %w", err)
 	}
 
+	stats.TotalRequests = agg.TotalRequests
+	stats.CacheHits = agg.CacheHits
+	stats.SuccessfulQueries = agg.Successful
+	if agg.AvgResponseTime.Valid {
+		stats.AverageResponseTime = agg.AvgResponseTime.Float64
+	}
+
 	// Get active clients (seen in last hour)
-	clientSQL := `
+	var activeClients int
+	if err := c.db.WithContext(ctx).Raw(`
 		SELECT COUNT(DISTINCT client_ip)::INTEGER
 		FROM dns_logs
 		WHERE timestamp >= NOW() - INTERVAL '1 hour'
-	`
-
-	err = c.db.QueryRowContext(ctx, clientSQL).Scan(&stats.ActiveClients)
-	if err != nil {
+	`).Scan(&activeClients).Error; err != nil {
 		// If this fails, we can still return the other stats
-		stats.ActiveClients = 0
+		activeClients = 0
 	}
+	stats.ActiveClients = activeClients
 
 	return stats, nil
 }
@@ -746,7 +706,12 @@ func (c *Client) HealthCheck() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := c.db.PingContext(ctx); err != nil {
+	sqlDB, err := c.db.WithContext(ctx).DB()
+	if err != nil {
+		return fmt.Errorf("failed to get database connection: %w", err)
+	}
+
+	if err := sqlDB.PingContext(ctx); err != nil {
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
 
@@ -756,7 +721,11 @@ func (c *Client) HealthCheck() error {
 // Close closes the PostgreSQL connection
 func (c *Client) Close() error {
 	if c.db != nil {
-		return c.db.Close()
+		sqlDB, err := c.db.DB()
+		if err != nil {
+			return err
+		}
+		return sqlDB.Close()
 	}
 	return nil
 }
@@ -767,4 +736,115 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// GetAllDNSMappings returns all DNS mappings from the database
+func (c *Client) GetAllDNSMappings() (map[string]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var mappings []DNSMapping
+	if err := c.db.WithContext(ctx).Order("domain").Find(&mappings).Error; err != nil {
+		return nil, fmt.Errorf("failed to query DNS mappings: %w", err)
+	}
+
+	result := make(map[string]string, len(mappings))
+	for _, m := range mappings {
+		result[m.Domain] = m.IPAddress
+	}
+
+	return result, nil
+}
+
+// CreateDNSMapping creates a new DNS mapping
+func (c *Client) CreateDNSMapping(domain, ipAddress string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Use raw SQL for proper ON CONFLICT handling
+	result := c.db.WithContext(ctx).Exec(`
+		INSERT INTO dns_mappings (domain, ip_address, updated_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT (domain) DO UPDATE
+		SET ip_address = EXCLUDED.ip_address, updated_at = CURRENT_TIMESTAMP
+	`, domain, ipAddress)
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to create DNS mapping: %w", result.Error)
+	}
+
+	return nil
+}
+
+// DeleteDNSMapping deletes a DNS mapping by domain
+func (c *Client) DeleteDNSMapping(domain string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result := c.db.WithContext(ctx).Where("domain = ?", domain).Delete(&DNSMapping{})
+	if result.Error != nil {
+		return fmt.Errorf("failed to delete DNS mapping: %w", result.Error)
+	}
+
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("DNS mapping not found")
+	}
+
+	return nil
+}
+
+// MigrateDNSMappingsFromJSON migrates DNS mappings from a JSON file to PostgreSQL
+func (c *Client) MigrateDNSMappingsFromJSON(jsonFilePath string) error {
+	// Check if file exists
+	data, err := os.ReadFile(jsonFilePath)
+	if os.IsNotExist(err) {
+		// File doesn't exist, nothing to migrate
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read JSON file: %w", err)
+	}
+
+	var config struct {
+		Mappings map[string]string `json:"mappings"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("failed to parse JSON: %w", err)
+	}
+
+	if len(config.Mappings) == 0 {
+		return nil
+	}
+
+	// Check if we already have mappings in the database
+	existingMappings, err := c.GetAllDNSMappings()
+	if err != nil {
+		return fmt.Errorf("failed to check existing mappings: %w", err)
+	}
+
+	if len(existingMappings) > 0 {
+		// Already migrated or has data, skip
+		return nil
+	}
+
+	// Migrate all mappings
+	for domain, ipAddress := range config.Mappings {
+		domain = strings.TrimSpace(domain)
+		ipAddress = strings.TrimSpace(ipAddress)
+
+		if domain == "" || ipAddress == "" {
+			continue
+		}
+
+		// Ensure domain ends with a dot for DNS processing
+		if !strings.HasSuffix(domain, ".") {
+			domain += "."
+		}
+
+		if err := c.CreateDNSMapping(domain, ipAddress); err != nil {
+			return fmt.Errorf("failed to migrate mapping %s: %w", domain, err)
+		}
+	}
+
+	return nil
 }
