@@ -462,9 +462,10 @@ func (c *Client) GetLogCount() (int64, error) {
 }
 
 // TimeSeriesPoint represents a time series data point
+// Field names must match SQL column aliases for GORM Raw().Scan() to map correctly
 type TimeSeriesPoint struct {
-	Timestamp int64
-	Value     int64
+	Ts    int64 `gorm:"column:ts" json:"ts"`
+	Count int64 `gorm:"column:count" json:"count"`
 }
 
 // GetTimeSeriesData returns aggregated time series data from PostgreSQL
@@ -474,9 +475,15 @@ func (c *Client) GetTimeSeriesData() (map[string][]TimeSeriesPoint, error) {
 
 	result := make(map[string][]TimeSeriesPoint)
 
+	// Get raw database connection for direct sql.Scan
+	sqlDB, err := c.db.WithContext(ctx).DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database connection: %w", err)
+	}
+
 	// Last hour - per minute (75 minutes)
 	var hourData []TimeSeriesPoint
-	if err := c.db.WithContext(ctx).Raw(`
+	rows, err := sqlDB.QueryContext(ctx, `
 		SELECT 
 			EXTRACT(EPOCH FROM DATE_TRUNC('minute', timestamp))::BIGINT as ts,
 			COUNT(*)::BIGINT as count
@@ -485,14 +492,28 @@ func (c *Client) GetTimeSeriesData() (map[string][]TimeSeriesPoint, error) {
 		GROUP BY DATE_TRUNC('minute', timestamp)
 		ORDER BY ts ASC
 		LIMIT 75
-	`).Scan(&hourData).Error; err != nil {
+	`)
+	if err != nil {
 		return nil, fmt.Errorf("failed to query hourly data: %w", err)
 	}
-	result["requests_last_hour"] = hourData
+	defer rows.Close()
+
+	for rows.Next() {
+		var point TimeSeriesPoint
+		if err := rows.Scan(&point.Ts, &point.Count); err != nil {
+			return nil, fmt.Errorf("failed to scan hourly data: %w", err)
+		}
+		hourData = append(hourData, point)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating hourly data: %w", err)
+	}
+
+	result["requests_last_hour"] = fillTimeSeriesSlots(hourData, time.Minute, 75)
 
 	// Last day - per hour (75 hours)
 	var dayData []TimeSeriesPoint
-	if err := c.db.WithContext(ctx).Raw(`
+	rows, err = sqlDB.QueryContext(ctx, `
 		SELECT 
 			EXTRACT(EPOCH FROM DATE_TRUNC('hour', timestamp))::BIGINT as ts,
 			COUNT(*)::BIGINT as count
@@ -501,14 +522,28 @@ func (c *Client) GetTimeSeriesData() (map[string][]TimeSeriesPoint, error) {
 		GROUP BY DATE_TRUNC('hour', timestamp)
 		ORDER BY ts ASC
 		LIMIT 75
-	`).Scan(&dayData).Error; err != nil {
+	`)
+	if err != nil {
 		return nil, fmt.Errorf("failed to query daily data: %w", err)
 	}
-	result["requests_last_day"] = dayData
+	defer rows.Close()
+
+	for rows.Next() {
+		var point TimeSeriesPoint
+		if err := rows.Scan(&point.Ts, &point.Count); err != nil {
+			return nil, fmt.Errorf("failed to scan daily data: %w", err)
+		}
+		dayData = append(dayData, point)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating daily data: %w", err)
+	}
+
+	result["requests_last_day"] = fillTimeSeriesSlots(dayData, time.Hour, 75)
 
 	// Last week - per day (75 days)
 	var weekData []TimeSeriesPoint
-	if err := c.db.WithContext(ctx).Raw(`
+	rows, err = sqlDB.QueryContext(ctx, `
 		SELECT 
 			EXTRACT(EPOCH FROM DATE_TRUNC('day', timestamp))::BIGINT as ts,
 			COUNT(*)::BIGINT as count
@@ -517,28 +552,126 @@ func (c *Client) GetTimeSeriesData() (map[string][]TimeSeriesPoint, error) {
 		GROUP BY DATE_TRUNC('day', timestamp)
 		ORDER BY ts ASC
 		LIMIT 75
-	`).Scan(&weekData).Error; err != nil {
+	`)
+	if err != nil {
 		return nil, fmt.Errorf("failed to query weekly data: %w", err)
 	}
-	result["requests_last_week"] = weekData
+	defer rows.Close()
 
-	// Last month - per day (75 days)
+	for rows.Next() {
+		var point TimeSeriesPoint
+		if err := rows.Scan(&point.Ts, &point.Count); err != nil {
+			return nil, fmt.Errorf("failed to scan weekly data: %w", err)
+		}
+		weekData = append(weekData, point)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating weekly data: %w", err)
+	}
+
+	result["requests_last_week"] = fillTimeSeriesSlots(weekData, 24*time.Hour, 75)
+
+	// Last month - per day (75 days, aggregated into weeks on frontend)
 	var monthData []TimeSeriesPoint
-	if err := c.db.WithContext(ctx).Raw(`
+	rows, err = sqlDB.QueryContext(ctx, `
 		SELECT 
 			EXTRACT(EPOCH FROM DATE_TRUNC('day', timestamp))::BIGINT as ts,
 			COUNT(*)::BIGINT as count
 		FROM dns_logs
-		WHERE timestamp >= NOW() - INTERVAL '75 days'
+		WHERE timestamp >= NOW() - INTERVAL '525 days'
 		GROUP BY DATE_TRUNC('day', timestamp)
 		ORDER BY ts ASC
-		LIMIT 75
-	`).Scan(&monthData).Error; err != nil {
+		LIMIT 525
+	`)
+	if err != nil {
 		return nil, fmt.Errorf("failed to query monthly data: %w", err)
 	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var point TimeSeriesPoint
+		if err := rows.Scan(&point.Ts, &point.Count); err != nil {
+			return nil, fmt.Errorf("failed to scan monthly data: %w", err)
+		}
+		monthData = append(monthData, point)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating monthly data: %w", err)
+	}
+
+	// For monthly/weekly view, we return daily data that will be aggregated into weeks by the frontend
 	result["requests_last_month"] = monthData
 
 	return result, nil
+}
+
+// fillTimeSeriesSlots fills in missing time slots with zero values to ensure exactly count slots
+func fillTimeSeriesSlots(data []TimeSeriesPoint, duration time.Duration, count int) []TimeSeriesPoint {
+	if len(data) == 0 {
+		// If no data at all, return all zeros
+		return generateEmptyTimeSeries(duration, count)
+	}
+
+	now := time.Now()
+	dataMap := make(map[int64]int64)
+	for _, point := range data {
+		dataMap[point.Ts] = point.Count
+	}
+
+	result := make([]TimeSeriesPoint, count)
+	for i := 0; i < count; i++ {
+		slotTime := now.Add(-time.Duration(count-1-i) * duration)
+		var truncatedTime time.Time
+		switch duration {
+		case time.Minute:
+			truncatedTime = slotTime.Truncate(time.Minute)
+		case time.Hour:
+			truncatedTime = slotTime.Truncate(time.Hour)
+		case 24 * time.Hour:
+			truncatedTime = slotTime.Truncate(24 * time.Hour)
+		default:
+			truncatedTime = slotTime.Truncate(duration)
+		}
+
+		timestamp := truncatedTime.Unix()
+		value := int64(0)
+		if v, exists := dataMap[timestamp]; exists {
+			value = v
+		}
+
+		result[i] = TimeSeriesPoint{
+			Ts:    timestamp,
+			Count: value,
+		}
+	}
+
+	return result
+}
+
+// generateEmptyTimeSeries generates a time series with all zero values
+func generateEmptyTimeSeries(duration time.Duration, count int) []TimeSeriesPoint {
+	now := time.Now()
+	result := make([]TimeSeriesPoint, count)
+	for i := 0; i < count; i++ {
+		slotTime := now.Add(-time.Duration(count-1-i) * duration)
+		var truncatedTime time.Time
+		switch duration {
+		case time.Minute:
+			truncatedTime = slotTime.Truncate(time.Minute)
+		case time.Hour:
+			truncatedTime = slotTime.Truncate(time.Hour)
+		case 24 * time.Hour:
+			truncatedTime = slotTime.Truncate(24 * time.Hour)
+		default:
+			truncatedTime = slotTime.Truncate(duration)
+		}
+
+		result[i] = TimeSeriesPoint{
+			Ts:    truncatedTime.Unix(),
+			Count: 0,
+		}
+	}
+	return result
 }
 
 // ClientMetric represents aggregated client statistics

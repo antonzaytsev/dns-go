@@ -251,11 +251,14 @@ func (s *Server) buildDashboardMetricsFromPostgres() (*metrics.DashboardMetrics,
 	}
 
 	// Convert time series data
+	// For weekly view, aggregate daily data into weekly buckets
+	weeklyData := aggregateDailyToWeekly(timeSeriesData["requests_last_month"])
+
 	timeSeries := metrics.TimeSeriesData{
 		RequestsLastHour:  convertTimeSeriesPoints(timeSeriesData["requests_last_hour"]),
 		RequestsLastDay:   convertTimeSeriesPoints(timeSeriesData["requests_last_day"]),
 		RequestsLastWeek:  convertTimeSeriesPoints(timeSeriesData["requests_last_week"]),
-		RequestsLastMonth: convertTimeSeriesPoints(timeSeriesData["requests_last_month"]),
+		RequestsLastMonth: weeklyData,
 	}
 
 	// Convert top clients
@@ -301,11 +304,66 @@ func convertTimeSeriesPoints(points []postgres.TimeSeriesPoint) []metrics.TimePo
 	for i, point := range points {
 		// PostgreSQL returns Unix timestamp in seconds, frontend expects milliseconds
 		result[i] = metrics.TimePoint{
-			Timestamp: point.Timestamp * 1000,
-			Value:     point.Value,
+			Timestamp: point.Ts * 1000,
+			Value:     point.Count,
 		}
 	}
 	return result
+}
+
+// aggregateDailyToWeekly aggregates daily data points into weekly buckets
+func aggregateDailyToWeekly(dailyPoints []postgres.TimeSeriesPoint) []metrics.TimePoint {
+	// Convert daily points to a map for easier lookup
+	dailyMap := make(map[int64]int64)
+	for _, point := range dailyPoints {
+		dailyMap[point.Ts] = point.Count
+	}
+
+	now := time.Now()
+	count := 75
+	result := make([]metrics.TimePoint, count)
+
+	for i := 0; i < count; i++ {
+		// Calculate the start of the week for this slot
+		weeksAgo := count - 1 - i
+		targetWeek := now.Add(-time.Duration(weeksAgo) * 7 * 24 * time.Hour)
+
+		// Get the Monday of that week (week starts on Monday)
+		weekStart := getWeekStart(targetWeek)
+
+		// Aggregate daily data for this week
+		var weekTotal int64
+		for dayOffset := 0; dayOffset < 7; dayOffset++ {
+			dayTime := weekStart.Add(time.Duration(dayOffset) * 24 * time.Hour)
+			dayTimestamp := dayTime.Truncate(24 * time.Hour).Unix()
+			if val, exists := dailyMap[dayTimestamp]; exists {
+				weekTotal += val
+			}
+		}
+
+		result[i] = metrics.TimePoint{
+			Timestamp: weekStart.Unix() * 1000, // Convert to milliseconds for JavaScript
+			Value:     weekTotal,
+		}
+	}
+
+	return result
+}
+
+// getWeekStart returns the Monday (start of week) for the given date
+func getWeekStart(t time.Time) time.Time {
+	// Calculate days since Monday (Monday = 1, Sunday = 0)
+	weekday := int(t.Weekday())
+	if weekday == 0 {
+		weekday = 7 // Sunday becomes 7
+	}
+
+	// Go back to Monday
+	daysSinceMonday := weekday - 1
+	weekStart := t.Add(-time.Duration(daysSinceMonday) * 24 * time.Hour)
+
+	// Truncate to start of day
+	return time.Date(weekStart.Year(), weekStart.Month(), weekStart.Day(), 0, 0, 0, 0, weekStart.Location())
 }
 
 func (s *Server) handleClients(w http.ResponseWriter, r *http.Request) {
