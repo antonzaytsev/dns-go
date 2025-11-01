@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { ExternalLink } from 'lucide-react';
 
 const Navigation: React.FC = () => {
   const location = useLocation();
@@ -50,6 +51,15 @@ const Navigation: React.FC = () => {
       >
         Clients
       </Link>
+      <a
+        href={`http://${window.location.hostname}:${process.env.REACT_APP_KIBANA_PORT || '5601'}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300 border-b-2 border-transparent"
+      >
+        <span className="mr-1">Kibana</span>
+        <ExternalLink className="h-3 w-3" />
+      </a>
     </nav>
   );
 };
