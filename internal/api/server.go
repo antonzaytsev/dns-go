@@ -121,6 +121,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/version", s.handleVersion)
 	mux.HandleFunc("/api/dns-mappings", s.handleDNSMappings)
 	mux.HandleFunc("/api/log-counts", s.handleLogCounts)
+	mux.HandleFunc("/api/docs/logs", s.handleLogsDocs)
 
 	// CORS middleware
 	handler := s.corsMiddleware(s.loggingMiddleware(mux))
@@ -146,6 +147,7 @@ func (s *Server) Start() error {
 	fmt.Printf("  🔍 GET /api/metrics      - DNS server metrics and statistics\n")
 	fmt.Printf("  👥 GET /api/clients      - DNS clients and statistics\n")
 	fmt.Printf("  🔎 GET /api/search       - Search through DNS logs\n")
+	fmt.Printf("  📚 GET /api/docs/logs    - Logs API documentation\n")
 	fmt.Printf("  ❤️  GET /api/health       - Health check endpoint\n")
 	fmt.Printf("  ℹ️  GET /api/version      - Version and build information\n")
 	fmt.Printf("  🌐 GET/PUT/POST/DELETE /api/dns-mappings - Manage custom DNS mappings\n")
@@ -925,5 +927,202 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh %dm", hours, minutes)
 	} else {
 		return fmt.Sprintf("%dm", minutes)
+	}
+}
+
+func (s *Server) handleLogsDocs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	baseURL := fmt.Sprintf("http://localhost:%s", s.port)
+	if host := r.Host; host != "" {
+		baseURL = fmt.Sprintf("http://%s", host)
+	}
+
+	docs := map[string]interface{}{
+		"title":       "DNS Logs API - Quick Reference",
+		"description": "API documentation for querying DNS logs",
+		"base_url":    baseURL,
+		"endpoint": map[string]interface{}{
+			"path":   "/api/search",
+			"method": "GET",
+			"url":    fmt.Sprintf("%s/api/search", baseURL),
+		},
+		"query_parameters": []map[string]interface{}{
+			{
+				"name":        "q",
+				"type":        "string",
+				"required":    false,
+				"description": "Search term (searches in query, client_ip, query_type, status, response_upstream, uuid, and ip_addresses)",
+			},
+			{
+				"name":        "limit",
+				"type":        "integer",
+				"required":    false,
+				"default":     100,
+				"max":         1000,
+				"description": "Number of results to return",
+			},
+			{
+				"name":        "offset",
+				"type":        "integer",
+				"required":    false,
+				"default":     0,
+				"description": "Pagination offset",
+			},
+			{
+				"name":        "since",
+				"type":        "string",
+				"required":    false,
+				"format":      "RFC3339 (e.g., 2024-01-02T15:04:05Z)",
+				"description": "Filter logs from this timestamp onwards",
+			},
+		},
+		"examples": []map[string]interface{}{
+			{
+				"description": "Get latest 100 logs",
+				"url":         fmt.Sprintf("%s/api/search", baseURL),
+				"curl":        fmt.Sprintf("curl %s/api/search", baseURL),
+			},
+			{
+				"description": "Get latest 50 logs",
+				"url":         fmt.Sprintf("%s/api/search?limit=50", baseURL),
+				"curl":        fmt.Sprintf("curl '%s/api/search?limit=50'", baseURL),
+			},
+			{
+				"description": "Search for specific domain",
+				"url":         fmt.Sprintf("%s/api/search?q=example.com", baseURL),
+				"curl":        fmt.Sprintf("curl '%s/api/search?q=example.com'", baseURL),
+			},
+			{
+				"description": "Get logs since a specific time",
+				"url":         fmt.Sprintf("%s/api/search?since=2024-01-02T15:04:05Z", baseURL),
+				"curl":        fmt.Sprintf("curl '%s/api/search?since=2024-01-02T15:04:05Z'", baseURL),
+			},
+			{
+				"description": "Get latest logs with pagination (first page)",
+				"url":         fmt.Sprintf("%s/api/search?limit=100&offset=0", baseURL),
+				"curl":        fmt.Sprintf("curl '%s/api/search?limit=100&offset=0'", baseURL),
+			},
+			{
+				"description": "Get latest logs with pagination (second page)",
+				"url":         fmt.Sprintf("%s/api/search?limit=100&offset=100", baseURL),
+				"curl":        fmt.Sprintf("curl '%s/api/search?limit=100&offset=100'", baseURL),
+			},
+			{
+				"description": "Combined: Search and filter by time",
+				"url":         fmt.Sprintf("%s/api/search?q=example.com&since=2024-01-02T15:04:05Z&limit=50", baseURL),
+				"curl":        fmt.Sprintf("curl '%s/api/search?q=example.com&since=2024-01-02T15:04:05Z&limit=50'", baseURL),
+			},
+		},
+		"response_format": map[string]interface{}{
+			"results": []map[string]interface{}{
+				{
+					"timestamp": "2024-01-02T15:04:05Z",
+					"uuid":      "abc123",
+					"request": map[string]interface{}{
+						"client": "192.168.1.1",
+						"query":  "example.com",
+						"type":   "A",
+						"id":     12345,
+					},
+					"upstreams": []map[string]interface{}{
+						{
+							"server":      "8.8.8.8:53",
+							"attempt":     1,
+							"rtt_ms":      12.5,
+							"duration_ms": 15.2,
+						},
+					},
+					"response": map[string]interface{}{
+						"upstream":     "8.8.8.8:53",
+						"rcode":        "NOERROR",
+						"answer_count": 1,
+						"rtt_ms":       12.5,
+					},
+					"answers":           [][]string{{"example.com", "300", "IN", "A", "93.184.216.34"}},
+					"ip_addresses":      []string{"93.184.216.34"},
+					"status":            "success",
+					"total_duration_ms": 15.2,
+					"cache_hit":         false,
+				},
+			},
+			"total":  1500,
+			"limit":  100,
+			"offset": 0,
+			"query":  "example.com",
+			"since":  "2024-01-02T15:04:05Z",
+			"source": "postgres",
+		},
+		"response_fields": map[string]interface{}{
+			"results": "Array of log entries (ordered by timestamp DESC - newest first)",
+			"total":   "Total number of matching log entries",
+			"limit":   "Limit used in the query",
+			"offset":  "Offset used in the query",
+			"query":   "Search term used (if any)",
+			"since":   "Timestamp filter used (if any)",
+			"source":  "Data source (postgres)",
+		},
+		"log_entry_fields": map[string]interface{}{
+			"timestamp":         "ISO 8601 timestamp of the DNS query",
+			"uuid":              "Unique identifier for the request",
+			"request.client":    "Client IP address",
+			"request.query":     "DNS query domain name",
+			"request.type":      "DNS query type (A, AAAA, MX, etc.)",
+			"request.id":        "DNS query ID",
+			"upstreams":         "Array of upstream server attempts",
+			"response":          "Response information (if successful)",
+			"answers":           "DNS answer records",
+			"ip_addresses":      "Extracted IP addresses from A/AAAA records",
+			"status":            "Query status (success, error, timeout, etc.)",
+			"total_duration_ms": "Total duration in milliseconds",
+			"cache_hit":         "Whether the response was served from cache",
+		},
+		"search_behavior": map[string]interface{}{
+			"description": "The search term (q parameter) performs case-insensitive pattern matching across:",
+			"fields": []string{
+				"Query domain name",
+				"Client IP address",
+				"Query type",
+				"Status",
+				"Response upstream server",
+				"UUID (exact match)",
+				"IP addresses in responses",
+			},
+		},
+		"notes": []string{
+			"Results are always ordered by timestamp descending (newest first)",
+			"Maximum limit is 1000",
+			"The since timestamp must be in RFC3339 format: YYYY-MM-DDTHH:MM:SSZ",
+			"The since timestamp cannot be in the future",
+			"PostgreSQL must be configured and connected for this endpoint to work",
+		},
+		"integration_guide": map[string]interface{}{
+			"step1": map[string]interface{}{
+				"description": "Make a GET request to the search endpoint",
+				"example":     fmt.Sprintf("GET %s/api/search", baseURL),
+			},
+			"step2": map[string]interface{}{
+				"description": "Add query parameters as needed",
+				"example":     fmt.Sprintf("GET %s/api/search?q=example.com&limit=50", baseURL),
+			},
+			"step3": map[string]interface{}{
+				"description": "Parse the JSON response",
+				"example":     "The response contains a 'results' array with log entries and 'total' for pagination",
+			},
+			"step4": map[string]interface{}{
+				"description": "Use pagination for large result sets",
+				"example":     fmt.Sprintf("GET %s/api/search?limit=100&offset=0", baseURL),
+			},
+		},
+	}
+
+	if err := json.NewEncoder(w).Encode(docs); err != nil {
+		http.Error(w, "Failed to encode documentation", http.StatusInternalServerError)
+		return
 	}
 }
