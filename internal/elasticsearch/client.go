@@ -181,9 +181,6 @@ func (c *Client) createIndexIfNotExists(ctx context.Context) error {
 				"total_duration_ms": map[string]interface{}{
 					"type": "float",
 				},
-				"cache_hit": map[string]interface{}{
-					"type": "boolean",
-				},
 			},
 		},
 		"settings": map[string]interface{}{

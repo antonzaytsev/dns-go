@@ -20,8 +20,6 @@ const (
 	defaultListenAddress       = "0.0.0.0"
 	defaultPort                = "53"
 	defaultLogLevel            = "info"
-	defaultCacheTTL            = 5 * time.Minute
-	defaultCacheSize           = 10000
 	defaultMaxConcurrent       = 100
 	defaultTimeout             = 5 * time.Second
 	defaultRetryAttempts       = 3
@@ -42,8 +40,6 @@ type Config struct {
 	CustomDNS           map[string]string `json:"custom_dns,omitempty"`
 	LogFile             string            `json:"log_file,omitempty"`
 	LogLevel            string            `json:"log_level"`
-	CacheTTL            time.Duration     `json:"cache_ttl"`
-	CacheSize           int               `json:"cache_size"`
 	MaxConcurrent       int               `json:"max_concurrent"`
 	Timeout             time.Duration     `json:"timeout"`
 	RetryAttempts       int               `json:"retry_attempts"`
@@ -68,8 +64,6 @@ func DefaultConfig() *Config {
 		UpstreamDNS:         append([]string(nil), defaultUpstreamDNS...), // Copy slice
 		CustomDNS:           make(map[string]string),
 		LogLevel:            defaultLogLevel,
-		CacheTTL:            defaultCacheTTL,
-		CacheSize:           defaultCacheSize,
 		MaxConcurrent:       defaultMaxConcurrent,
 		Timeout:             defaultTimeout,
 		RetryAttempts:       defaultRetryAttempts,
@@ -88,8 +82,6 @@ func LoadFromFlags() (*Config, error) {
 	customDNS := flag.String("custom-dns", "", "Custom DNS mappings in format: domain1=ip1,domain2=ip2 (e.g., server.local=192.168.0.30)")
 	logFile := flag.String("log", cfg.LogFile, "Log file path (optional)")
 	logLevel := flag.String("log-level", cfg.LogLevel, "Log level (debug, info, warn, error)")
-	cacheTTL := flag.Duration("cache-ttl", cfg.CacheTTL, "DNS cache TTL")
-	cacheSize := flag.Int("cache-size", cfg.CacheSize, "DNS cache size")
 	maxConcurrent := flag.Int("max-concurrent", cfg.MaxConcurrent, "Maximum concurrent requests")
 	timeout := flag.Duration("timeout", cfg.Timeout, "Upstream server timeout")
 	retryAttempts := flag.Int("retry-attempts", cfg.RetryAttempts, "Number of retry attempts")
@@ -100,8 +92,6 @@ func LoadFromFlags() (*Config, error) {
 	cfg.Port = strings.TrimSpace(*port)
 	cfg.LogFile = strings.TrimSpace(*logFile)
 	cfg.LogLevel = strings.ToLower(strings.TrimSpace(*logLevel))
-	cfg.CacheTTL = *cacheTTL
-	cfg.CacheSize = *cacheSize
 	cfg.MaxConcurrent = *maxConcurrent
 	cfg.Timeout = *timeout
 	cfg.RetryAttempts = *retryAttempts
@@ -161,10 +151,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("at least one upstream DNS server must be specified")
 	}
 
-	if c.CacheSize <= 0 {
-		return fmt.Errorf("cache size must be positive, got %d", c.CacheSize)
-	}
-
 	if c.MaxConcurrent <= 0 {
 		return fmt.Errorf("max concurrent requests must be positive, got %d", c.MaxConcurrent)
 	}
@@ -175,10 +161,6 @@ func (c *Config) Validate() error {
 
 	if c.Timeout <= 0 {
 		return fmt.Errorf("timeout must be positive, got %v", c.Timeout)
-	}
-
-	if c.CacheTTL <= 0 {
-		return fmt.Errorf("cache TTL must be positive, got %v", c.CacheTTL)
 	}
 
 	// Validate log level
@@ -312,8 +294,8 @@ func (c *Config) loadCustomDNSFromFile() error {
 
 // String returns a string representation of the configuration (excluding sensitive data).
 func (c *Config) String() string {
-	return fmt.Sprintf("Config{Listen: %s:%s, Upstreams: %v, LogLevel: %s, CacheSize: %d}",
-		c.ListenAddress, c.Port, c.UpstreamDNS, c.LogLevel, c.CacheSize)
+	return fmt.Sprintf("Config{Listen: %s:%s, Upstreams: %v, LogLevel: %s}",
+		c.ListenAddress, c.Port, c.UpstreamDNS, c.LogLevel)
 }
 
 // HasCustomDNSFileChanged checks if the custom DNS configuration file has been modified

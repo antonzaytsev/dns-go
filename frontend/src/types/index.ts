@@ -48,7 +48,6 @@ export interface DnsRequest {
 export interface Client {
   ip: string;
   requests: number;
-  cache_hit_rate: number;
   success_rate: number;
   last_seen: string;
 }
@@ -57,7 +56,6 @@ export interface OverviewMetrics {
   uptime: string;
   total_requests: number;
   requests_per_second: number;
-  cache_hit_rate: number;
   success_rate: number;
   average_response_time_ms: number;
   clients: number;
@@ -70,8 +68,6 @@ export interface QueryTypeMetric {
 
 export interface Metrics {
   total_requests?: number;
-  cache_hits?: number;
-  cache_misses?: number;
   upstream_requests?: number;
   failed_requests?: number;
   avg_response_time?: number;

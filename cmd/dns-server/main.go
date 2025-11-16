@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"dns-go/internal/cache"
 	"dns-go/internal/config"
 	"dns-go/internal/logging"
 	"dns-go/internal/postgres"
@@ -32,7 +31,6 @@ type DNSServer struct {
 	logger         *logging.Logger
 	resolver       *resolver.LocalResolver
 	upstreamMgr    *upstream.Manager
-	cache          *cache.Cache
 	requestLimiter chan struct{}
 	wg             sync.WaitGroup
 	shutdown       chan struct{}
@@ -47,9 +45,6 @@ func NewDNSServer(cfg *config.Config, logger *logging.Logger) *DNSServer {
 	// Create upstream manager with concurrent query support
 	upstreamMgr := upstream.New(cfg.UpstreamDNS, cfg.Timeout, cfg.RetryAttempts)
 
-	// Create DNS cache
-	dnsCache := cache.New(cfg.CacheSize, cfg.CacheTTL)
-
 	// Create request limiter channel
 	requestLimiter := make(chan struct{}, cfg.MaxConcurrent)
 
@@ -58,7 +53,6 @@ func NewDNSServer(cfg *config.Config, logger *logging.Logger) *DNSServer {
 		logger:         logger,
 		resolver:       localResolver,
 		upstreamMgr:    upstreamMgr,
-		cache:          dnsCache,
 		requestLimiter: requestLimiter,
 		shutdown:       make(chan struct{}),
 	}
@@ -66,7 +60,7 @@ func NewDNSServer(cfg *config.Config, logger *logging.Logger) *DNSServer {
 	return server
 }
 
-// handleDNSRequest processes incoming DNS queries with caching and concurrent upstream queries
+// handleDNSRequest processes incoming DNS queries with concurrent upstream queries
 func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	// Rate limiting
 	select {
@@ -108,7 +102,7 @@ func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 		s.logger.LogDNSEntry(logEntry)
 		s.logger.LogRequestResponse(requestUUID, clientAddr, "MALFORMED", "UNKNOWN",
-			"malformed_query", types.DurationToMilliseconds(time.Since(start)), false, "none")
+			"malformed_query", types.DurationToMilliseconds(time.Since(start)), "none")
 		msg := &dns.Msg{}
 		msg.SetRcode(r, dns.RcodeFormatError)
 		w.WriteMsg(msg)
@@ -146,36 +140,8 @@ func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		s.logger.LogDNSEntry(logEntry)
 		s.logger.LogRequestResponse(requestUUID, clientAddr, question.Name,
 			dns.TypeToString[question.Qtype], "custom_resolution",
-			types.DurationToMilliseconds(time.Since(start)), false, "custom")
+			types.DurationToMilliseconds(time.Since(start)), "custom")
 		w.WriteMsg(customResp)
-		return
-	}
-
-	// Check cache first
-	if cachedResp, found := s.cache.Get(question); found {
-		logEntry.CacheHit = true
-		logEntry.Status = "cache_hit"
-		logEntry.Duration = types.DurationToMilliseconds(time.Since(start))
-
-		// Update response ID to match request
-		cachedResp.Id = r.Id
-
-		// Set response info for cache hit
-		logEntry.Response = &types.ResponseInfo{
-			Upstream:    "cache",
-			Rcode:       dns.RcodeToString[cachedResp.Rcode],
-			AnswerCount: len(cachedResp.Answer),
-			RTT:         0, // Cache hit, no network RTT
-		}
-
-		logEntry.Answers = types.ExtractAnswers(cachedResp.Answer)
-		logEntry.IPAddresses = types.ExtractIPAddresses(cachedResp.Answer)
-
-		s.logger.LogDNSEntry(logEntry)
-		s.logger.LogRequestResponse(requestUUID, clientAddr, question.Name,
-			dns.TypeToString[question.Qtype], "cache_hit",
-			types.DurationToMilliseconds(time.Since(start)), true, "cache")
-		w.WriteMsg(cachedResp)
 		return
 	}
 
@@ -218,13 +184,10 @@ func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		logEntry.Status = "success"
 		logEntry.Duration = types.DurationToMilliseconds(time.Since(start))
 
-		// Cache the response
-		s.cache.Set(question, result.Response)
-
 		s.logger.LogDNSEntry(logEntry)
 		s.logger.LogRequestResponse(requestUUID, clientAddr, question.Name,
 			dns.TypeToString[question.Qtype], "success",
-			types.DurationToMilliseconds(time.Since(start)), false, result.Server)
+			types.DurationToMilliseconds(time.Since(start)), result.Server)
 
 		// Forward the response back to the client
 		if err := w.WriteMsg(result.Response); err != nil {
@@ -243,7 +206,7 @@ func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	s.logger.LogJSON(logEntry)
 	s.logger.LogRequestResponse(requestUUID, clientAddr, question.Name,
 		dns.TypeToString[question.Qtype], "all_upstreams_failed",
-		types.DurationToMilliseconds(time.Since(start)), false, "none")
+		types.DurationToMilliseconds(time.Since(start)), "none")
 
 	msg := &dns.Msg{}
 	msg.SetRcode(r, dns.RcodeServerFailure)
@@ -260,7 +223,6 @@ func (s *DNSServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 func (s *DNSServer) Start(ctx context.Context) error {
 	// Start background services
 	s.upstreamMgr.StartHealthChecks(s.config.HealthCheckInterval)
-	s.cache.StartCleanupTimer(5 * time.Minute)
 
 	// Start custom DNS configuration watcher
 	s.startCustomDNSWatcher(ctx)
@@ -393,15 +355,10 @@ func (s *DNSServer) startCustomDNSWatcher(ctx context.Context) {
 
 // GetStats returns server statistics
 func (s *DNSServer) GetStats() map[string]interface{} {
-	cacheSize, maxCacheSize := s.cache.Stats()
 	upstreamStats := s.upstreamMgr.GetStats()
 
 	return map[string]interface{}{
-		"version": version.Get().Short(),
-		"cache": map[string]interface{}{
-			"size":     cacheSize,
-			"max_size": maxCacheSize,
-		},
+		"version":   version.Get().Short(),
 		"upstreams": upstreamStats,
 	}
 }
@@ -485,8 +442,6 @@ func run() error {
 		"upstreams":      cfg.UpstreamDNS,
 		"log_file":       cfg.LogFile,
 		"log_level":      cfg.LogLevel,
-		"cache_size":     cfg.CacheSize,
-		"cache_ttl":      cfg.CacheTTL.String(),
 		"max_concurrent": cfg.MaxConcurrent,
 		"timeout":        cfg.Timeout.String(),
 	}

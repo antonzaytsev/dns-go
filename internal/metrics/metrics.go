@@ -17,8 +17,6 @@ type Metrics struct {
 	mu                sync.RWMutex
 	startTime         time.Time
 	totalRequests     int64
-	cacheHits         int64
-	cacheMisses       int64
 	successfulQueries int64
 	failedQueries     int64
 	rateLimited       int64
@@ -52,7 +50,6 @@ type Metrics struct {
 type ClientStats struct {
 	TotalRequests     int64     `json:"total_requests"`
 	LastSeen          time.Time `json:"last_seen"`
-	CacheHits         int64     `json:"cache_hits"`
 	SuccessfulQueries int64     `json:"successful_queries"`
 	FailedQueries     int64     `json:"failed_queries"`
 }
@@ -90,7 +87,6 @@ type OverviewMetrics struct {
 	Uptime              string  `json:"uptime"`
 	TotalRequests       int64   `json:"total_requests"`
 	RequestsPerSecond   float64 `json:"requests_per_second"`
-	CacheHitRate        float64 `json:"cache_hit_rate"`
 	SuccessRate         float64 `json:"success_rate"`
 	AverageResponseTime float64 `json:"average_response_time_ms"`
 	Clients             int     `json:"clients"`
@@ -111,11 +107,10 @@ type TimePoint struct {
 
 // ClientMetric represents client statistics for the dashboard
 type ClientMetric struct {
-	IP           string    `json:"ip"`
-	Requests     int64     `json:"requests"`
-	CacheHitRate float64   `json:"cache_hit_rate"`
-	SuccessRate  float64   `json:"success_rate"`
-	LastSeen     time.Time `json:"last_seen"`
+	IP          string    `json:"ip"`
+	Requests    int64     `json:"requests"`
+	SuccessRate float64   `json:"success_rate"`
+	LastSeen    time.Time `json:"last_seen"`
 }
 
 // SystemInfo provides system-level information
@@ -177,11 +172,7 @@ func (m *Metrics) RecordRequest(entry types.LogEntry) {
 
 	// Status-based metrics
 	switch entry.Status {
-	case "cache_hit":
-		m.cacheHits++
-		m.clientStats[clientIP].CacheHits++
 	case "success":
-		m.cacheMisses++
 		m.successfulQueries++
 		m.clientStats[clientIP].SuccessfulQueries++
 
@@ -190,7 +181,7 @@ func (m *Metrics) RecordRequest(entry types.LogEntry) {
 		m.responseTimeCount++
 
 		// Upstream statistics
-		if entry.Response != nil && entry.Response.Upstream != "cache" {
+		if entry.Response != nil {
 			upstream := entry.Response.Upstream
 			if stats, exists := m.upstreamStats[upstream]; exists {
 				stats.TotalQueries++
@@ -211,7 +202,6 @@ func (m *Metrics) RecordRequest(entry types.LogEntry) {
 			}
 		}
 	case "all_upstreams_failed":
-		m.cacheMisses++
 		m.failedQueries++
 		m.clientStats[clientIP].FailedQueries++
 
@@ -269,11 +259,10 @@ func (m *Metrics) GetDashboardMetrics(version string) DashboardMetrics {
 	uptime := time.Since(m.startTime)
 
 	// Calculate rates
-	var cacheHitRate, successRate, avgResponseTime, requestsPerSecond float64
+	var successRate, avgResponseTime, requestsPerSecond float64
 
 	if m.totalRequests > 0 {
-		cacheHitRate = float64(m.cacheHits) / float64(m.totalRequests) * 100
-		successRate = float64(m.successfulQueries+m.cacheHits) / float64(m.totalRequests) * 100
+		successRate = float64(m.successfulQueries) / float64(m.totalRequests) * 100
 		requestsPerSecond = float64(m.totalRequests) / uptime.Seconds()
 	}
 
@@ -301,7 +290,6 @@ func (m *Metrics) GetDashboardMetrics(version string) DashboardMetrics {
 			Uptime:              formatDuration(uptime),
 			TotalRequests:       m.totalRequests,
 			RequestsPerSecond:   requestsPerSecond,
-			CacheHitRate:        cacheHitRate,
 			SuccessRate:         successRate,
 			AverageResponseTime: avgResponseTime,
 			Clients:             activeClients,
@@ -477,18 +465,16 @@ func (m *Metrics) getTopClients() []ClientMetric {
 	clients := make([]ClientMetric, 0, len(m.clientStats))
 
 	for ip, stats := range m.clientStats {
-		var cacheHitRate, successRate float64
+		var successRate float64
 		if stats.TotalRequests > 0 {
-			cacheHitRate = float64(stats.CacheHits) / float64(stats.TotalRequests) * 100
-			successRate = float64(stats.SuccessfulQueries+stats.CacheHits) / float64(stats.TotalRequests) * 100
+			successRate = float64(stats.SuccessfulQueries) / float64(stats.TotalRequests) * 100
 		}
 
 		clients = append(clients, ClientMetric{
-			IP:           ip,
-			Requests:     stats.TotalRequests,
-			CacheHitRate: cacheHitRate,
-			SuccessRate:  successRate,
-			LastSeen:     stats.LastSeen,
+			IP:          ip,
+			Requests:    stats.TotalRequests,
+			SuccessRate: successRate,
+			LastSeen:    stats.LastSeen,
 		})
 	}
 
@@ -512,18 +498,16 @@ func (m *Metrics) GetAllClients() []ClientMetric {
 	clients := make([]ClientMetric, 0, len(m.clientStats))
 
 	for ip, stats := range m.clientStats {
-		var cacheHitRate, successRate float64
+		var successRate float64
 		if stats.TotalRequests > 0 {
-			cacheHitRate = float64(stats.CacheHits) / float64(stats.TotalRequests) * 100
-			successRate = float64(stats.SuccessfulQueries+stats.CacheHits) / float64(stats.TotalRequests) * 100
+			successRate = float64(stats.SuccessfulQueries) / float64(stats.TotalRequests) * 100
 		}
 
 		clients = append(clients, ClientMetric{
-			IP:           ip,
-			Requests:     stats.TotalRequests,
-			CacheHitRate: cacheHitRate,
-			SuccessRate:  successRate,
-			LastSeen:     stats.LastSeen,
+			IP:          ip,
+			Requests:    stats.TotalRequests,
+			SuccessRate: successRate,
+			LastSeen:    stats.LastSeen,
 		})
 	}
 

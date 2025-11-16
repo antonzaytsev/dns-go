@@ -155,9 +155,6 @@ const ClientsPage: React.FC = () => {
                       Total Requests
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Cache Hit Rate
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Success Rate
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -173,19 +170,6 @@ const ClientsPage: React.FC = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         <span className="font-semibold">{formatNumber(client.requests)}</span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        <div className="flex items-center">
-                          <div className="flex-1 bg-gray-200 rounded-full h-2 mr-3 max-w-24">
-                            <div
-                              className="bg-green-500 h-2 rounded-full"
-                              style={{ width: `${Math.min(client.cache_hit_rate, 100)}%` }}
-                            ></div>
-                          </div>
-                          <span className="text-xs font-medium min-w-12 text-right">
-                            {client.cache_hit_rate?.toFixed(1)}%
-                          </span>
-                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         <div className="flex items-center">

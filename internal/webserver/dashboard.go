@@ -31,12 +31,6 @@ const dashboardHTML = `<!DOCTYPE html>
             </div>
 
             <div class="card overview-card">
-                <h3>Cache Hit Rate</h3>
-                <div class="metric-value" id="cacheHitRate">-%</div>
-                <div class="metric-subtitle">Cache Performance</div>
-            </div>
-
-            <div class="card overview-card">
                 <h3>Success Rate</h3>
                 <div class="metric-value" id="successRate">-%</div>
                 <div class="metric-subtitle">Query Success</div>
@@ -336,10 +330,6 @@ body {
     transform: translateX(5px);
 }
 
-.request-item.cache-hit {
-    border-left-color: #48bb78;
-}
-
 .request-item.failed {
     border-left-color: #f56565;
 }
@@ -368,10 +358,6 @@ body {
     color: #22543d;
 }
 
-.request-status.cache-hit {
-    background: #bee3f8;
-    color: #2a4365;
-}
 
 .request-status.failed {
     background: #fed7d7;
@@ -602,7 +588,6 @@ class DNSDashboard {
         
         const totalRequestsEl = document.getElementById('totalRequests');
         const requestsPerSecondEl = document.getElementById('requestsPerSecond');
-        const cacheHitRateEl = document.getElementById('cacheHitRate');
         const successRateEl = document.getElementById('successRate');
         const avgResponseTimeEl = document.getElementById('avgResponseTime');
         const clientsEl = document.getElementById('clients');
@@ -610,7 +595,6 @@ class DNSDashboard {
         
         if (totalRequestsEl) totalRequestsEl.textContent = this.formatNumber(overview.total_requests || 0);
         if (requestsPerSecondEl) requestsPerSecondEl.textContent = (overview.requests_per_second || 0).toFixed(2) + ' req/sec';
-        if (cacheHitRateEl) cacheHitRateEl.textContent = (overview.cache_hit_rate || 0).toFixed(1) + '%';
         if (successRateEl) successRateEl.textContent = (overview.success_rate || 0).toFixed(1) + '%';
         if (avgResponseTimeEl) avgResponseTimeEl.textContent = (overview.average_response_time_ms || 0).toFixed(1) + ' ms';
         if (clientsEl) clientsEl.textContent = overview.clients || 0;
@@ -672,7 +656,6 @@ class DNSDashboard {
                 '<tr>' +
                     '<th>Client IP</th>' +
                     '<th>Requests</th>' +
-                    '<th>Cache Hit Rate</th>' +
                     '<th>Success Rate</th>' +
                     '<th>Last Seen</th>' +
                 '</tr>' +
@@ -682,7 +665,6 @@ class DNSDashboard {
                     '<tr>' +
                         '<td>' + client.ip + '</td>' +
                         '<td>' + this.formatNumber(client.requests) + '</td>' +
-                        '<td>' + client.cache_hit_rate.toFixed(1) + '%</td>' +
                         '<td>' + client.success_rate.toFixed(1) + '%</td>' +
                         '<td>' + this.formatTime(client.last_seen) + '</td>' +
                     '</tr>'
@@ -790,7 +772,6 @@ class DNSDashboard {
     getStatusClass(status) {
         switch (status) {
             case 'success': return 'success';
-            case 'cache_hit': return 'cache-hit';
             case 'all_upstreams_failed':
             case 'malformed_query': return 'failed';
             default: return '';
@@ -800,7 +781,6 @@ class DNSDashboard {
     getStatusText(status) {
         switch (status) {
             case 'success': return 'Success';
-            case 'cache_hit': return 'Cache Hit';
             case 'all_upstreams_failed': return 'Failed';
             case 'malformed_query': return 'Malformed';
             default: return status;

@@ -205,7 +205,6 @@ func toDNSLog(entry types.LogEntry) *DNSLog {
 		QueryType:   entry.Request.Type,
 		QueryID:     &queryID,
 		Status:      entry.Status,
-		CacheHit:    entry.CacheHit,
 		DurationMs:  &durationMs,
 		Upstreams:   upstreamsJSON,
 		Answers:     answersJSON,
@@ -234,8 +233,7 @@ func toLogEntry(log *DNSLog) types.LogEntry {
 			Query:  log.Query,
 			Type:   log.QueryType,
 		},
-		Status:   log.Status,
-		CacheHit: log.CacheHit,
+		Status: log.Status,
 	}
 
 	if log.QueryID != nil {
@@ -676,11 +674,10 @@ func generateEmptyTimeSeries(duration time.Duration, count int) []TimeSeriesPoin
 
 // ClientMetric represents aggregated client statistics
 type ClientMetric struct {
-	IP           string
-	Requests     int64
-	CacheHitRate float64
-	SuccessRate  float64
-	LastSeen     time.Time
+	IP          string
+	Requests    int64
+	SuccessRate float64
+	LastSeen    time.Time
 }
 
 // GetTopClients returns top clients aggregated from PostgreSQL
@@ -691,7 +688,6 @@ func (c *Client) GetTopClients(limit int) ([]ClientMetric, error) {
 	type ClientAggregate struct {
 		ClientIP      string    `gorm:"column:client_ip"`
 		TotalRequests int64     `gorm:"column:total_requests"`
-		CacheHits     int64     `gorm:"column:cache_hits"`
 		Successful    int64     `gorm:"column:successful"`
 		LastSeen      time.Time `gorm:"column:last_seen"`
 	}
@@ -701,8 +697,7 @@ func (c *Client) GetTopClients(limit int) ([]ClientMetric, error) {
 		SELECT 
 			client_ip,
 			COUNT(*)::BIGINT as total_requests,
-			COUNT(*) FILTER (WHERE cache_hit = true)::BIGINT as cache_hits,
-			COUNT(*) FILTER (WHERE status = 'success' OR status = 'cache_hit')::BIGINT as successful,
+			COUNT(*) FILTER (WHERE status = 'success')::BIGINT as successful,
 			MAX(timestamp) as last_seen
 		FROM dns_logs
 		GROUP BY client_ip
@@ -720,7 +715,6 @@ func (c *Client) GetTopClients(limit int) ([]ClientMetric, error) {
 			LastSeen: agg.LastSeen,
 		}
 		if agg.TotalRequests > 0 {
-			clients[i].CacheHitRate = float64(agg.CacheHits) / float64(agg.TotalRequests) * 100
 			clients[i].SuccessRate = float64(agg.Successful) / float64(agg.TotalRequests) * 100
 		}
 	}
@@ -771,7 +765,6 @@ func (c *Client) GetTopQueryTypes(limit int) ([]QueryTypeMetric, error) {
 // OverviewStats represents overview statistics
 type OverviewStats struct {
 	TotalRequests       int64
-	CacheHits           int64
 	SuccessfulQueries   int64
 	AverageResponseTime float64
 	ActiveClients       int
@@ -786,7 +779,6 @@ func (c *Client) GetOverviewStats() (*OverviewStats, error) {
 
 	type StatsAggregate struct {
 		TotalRequests   int64           `gorm:"column:total_requests"`
-		CacheHits       int64           `gorm:"column:cache_hits"`
 		Successful      int64           `gorm:"column:successful"`
 		AvgResponseTime sql.NullFloat64 `gorm:"column:avg_response_time"`
 	}
@@ -795,8 +787,7 @@ func (c *Client) GetOverviewStats() (*OverviewStats, error) {
 	if err := c.db.WithContext(ctx).Raw(`
 		SELECT 
 			COUNT(*)::BIGINT as total_requests,
-			COUNT(*) FILTER (WHERE cache_hit = true)::BIGINT as cache_hits,
-			COUNT(*) FILTER (WHERE status = 'success' OR status = 'cache_hit')::BIGINT as successful,
+			COUNT(*) FILTER (WHERE status = 'success')::BIGINT as successful,
 			AVG(duration_ms) as avg_response_time
 		FROM dns_logs
 	`).Scan(&agg).Error; err != nil {
@@ -804,7 +795,6 @@ func (c *Client) GetOverviewStats() (*OverviewStats, error) {
 	}
 
 	stats.TotalRequests = agg.TotalRequests
-	stats.CacheHits = agg.CacheHits
 	stats.SuccessfulQueries = agg.Successful
 	if agg.AvgResponseTime.Valid {
 		stats.AverageResponseTime = agg.AvgResponseTime.Float64

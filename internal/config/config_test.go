@@ -26,9 +26,6 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("Expected LogLevel %s, got %s", defaultLogLevel, cfg.LogLevel)
 	}
 
-	if cfg.CacheTTL != defaultCacheTTL {
-		t.Errorf("Expected CacheTTL %v, got %v", defaultCacheTTL, cfg.CacheTTL)
-	}
 }
 
 func TestConfig_Validate(t *testing.T) {
@@ -48,11 +45,9 @@ func TestConfig_Validate(t *testing.T) {
 			config: &Config{
 				Port:          "",
 				UpstreamDNS:   []string{"8.8.8.8:53"},
-				CacheSize:     1000,
 				MaxConcurrent: 100,
 				RetryAttempts: 3,
 				Timeout:       5 * time.Second,
-				CacheTTL:      5 * time.Minute,
 				LogLevel:      "info",
 			},
 			wantErr: true,
@@ -63,41 +58,22 @@ func TestConfig_Validate(t *testing.T) {
 			config: &Config{
 				Port:          "53",
 				UpstreamDNS:   []string{},
-				CacheSize:     1000,
 				MaxConcurrent: 100,
 				RetryAttempts: 3,
 				Timeout:       5 * time.Second,
-				CacheTTL:      5 * time.Minute,
 				LogLevel:      "info",
 			},
 			wantErr: true,
 			errMsg:  "at least one upstream DNS server must be specified",
 		},
 		{
-			name: "negative cache size",
-			config: &Config{
-				Port:          "53",
-				UpstreamDNS:   []string{"8.8.8.8:53"},
-				CacheSize:     -1,
-				MaxConcurrent: 100,
-				RetryAttempts: 3,
-				Timeout:       5 * time.Second,
-				CacheTTL:      5 * time.Minute,
-				LogLevel:      "info",
-			},
-			wantErr: true,
-			errMsg:  "cache size must be positive",
-		},
-		{
 			name: "zero max concurrent",
 			config: &Config{
 				Port:          "53",
 				UpstreamDNS:   []string{"8.8.8.8:53"},
-				CacheSize:     1000,
 				MaxConcurrent: 0,
 				RetryAttempts: 3,
 				Timeout:       5 * time.Second,
-				CacheTTL:      5 * time.Minute,
 				LogLevel:      "info",
 			},
 			wantErr: true,
@@ -108,11 +84,9 @@ func TestConfig_Validate(t *testing.T) {
 			config: &Config{
 				Port:          "53",
 				UpstreamDNS:   []string{"8.8.8.8:53"},
-				CacheSize:     1000,
 				MaxConcurrent: 100,
 				RetryAttempts: -1,
 				Timeout:       5 * time.Second,
-				CacheTTL:      5 * time.Minute,
 				LogLevel:      "info",
 			},
 			wantErr: true,
@@ -123,11 +97,9 @@ func TestConfig_Validate(t *testing.T) {
 			config: &Config{
 				Port:          "53",
 				UpstreamDNS:   []string{"8.8.8.8:53"},
-				CacheSize:     1000,
 				MaxConcurrent: 100,
 				RetryAttempts: 3,
 				Timeout:       0,
-				CacheTTL:      5 * time.Minute,
 				LogLevel:      "info",
 			},
 			wantErr: true,
@@ -138,11 +110,9 @@ func TestConfig_Validate(t *testing.T) {
 			config: &Config{
 				Port:          "53",
 				UpstreamDNS:   []string{"8.8.8.8:53"},
-				CacheSize:     1000,
 				MaxConcurrent: 100,
 				RetryAttempts: 3,
 				Timeout:       5 * time.Second,
-				CacheTTL:      5 * time.Minute,
 				LogLevel:      "invalid",
 			},
 			wantErr: true,
@@ -206,7 +176,6 @@ func TestLoadFromFlags_MockFlags(t *testing.T) {
 		"-port=5353",
 		"-upstreams=1.1.1.1:53,9.9.9.9:53",
 		"-log-level=debug",
-		"-cache-size=5000",
 		"-max-concurrent=50",
 	}
 
@@ -230,10 +199,6 @@ func TestLoadFromFlags_MockFlags(t *testing.T) {
 
 	if cfg.LogLevel != "debug" {
 		t.Errorf("Expected LogLevel debug, got %s", cfg.LogLevel)
-	}
-
-	if cfg.CacheSize != 5000 {
-		t.Errorf("Expected CacheSize 5000, got %d", cfg.CacheSize)
 	}
 
 	if cfg.MaxConcurrent != 50 {

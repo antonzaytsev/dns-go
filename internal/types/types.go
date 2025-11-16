@@ -21,7 +21,6 @@ type LogEntry struct {
 	IPAddresses []string          `json:"ip_addresses,omitempty"`
 	Status      string            `json:"status"`
 	Duration    float64           `json:"total_duration_ms"`
-	CacheHit    bool              `json:"cache_hit,omitempty"`
 }
 
 // RequestInfo contains information about the DNS request

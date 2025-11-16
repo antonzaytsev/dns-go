@@ -288,14 +288,12 @@ func (s *Server) buildDashboardMetricsFromPostgresDirect() (*metrics.DashboardMe
 		Uptime:              uptimeStr,
 		TotalRequests:       overviewStats.TotalRequests,
 		RequestsPerSecond:   0, // Calculate from time window if needed
-		CacheHitRate:        0,
 		SuccessRate:         0,
 		AverageResponseTime: overviewStats.AverageResponseTime,
 		Clients:             overviewStats.ActiveClients,
 	}
 
 	if overviewStats.TotalRequests > 0 {
-		overview.CacheHitRate = float64(overviewStats.CacheHits) / float64(overviewStats.TotalRequests) * 100
 		overview.SuccessRate = float64(overviewStats.SuccessfulQueries) / float64(overviewStats.TotalRequests) * 100
 	}
 
@@ -314,11 +312,10 @@ func (s *Server) buildDashboardMetricsFromPostgresDirect() (*metrics.DashboardMe
 	clientMetrics := make([]metrics.ClientMetric, len(topClients))
 	for i, client := range topClients {
 		clientMetrics[i] = metrics.ClientMetric{
-			IP:           client.IP,
-			Requests:     client.Requests,
-			CacheHitRate: client.CacheHitRate,
-			SuccessRate:  client.SuccessRate,
-			LastSeen:     client.LastSeen,
+			IP:          client.IP,
+			Requests:    client.Requests,
+			SuccessRate: client.SuccessRate,
+			LastSeen:    client.LastSeen,
 		}
 	}
 
@@ -369,14 +366,12 @@ func (s *Server) convertCachedStatsToDashboardMetrics(cachedStats *postgres.Aggr
 		Uptime:              uptimeStr,
 		TotalRequests:       overviewStats.TotalRequests,
 		RequestsPerSecond:   0,
-		CacheHitRate:        0,
 		SuccessRate:         0,
 		AverageResponseTime: overviewStats.AverageResponseTime,
 		Clients:             overviewStats.ActiveClients,
 	}
 
 	if overviewStats.TotalRequests > 0 {
-		overview.CacheHitRate = float64(overviewStats.CacheHits) / float64(overviewStats.TotalRequests) * 100
 		overview.SuccessRate = float64(overviewStats.SuccessfulQueries) / float64(overviewStats.TotalRequests) * 100
 	}
 
@@ -394,11 +389,10 @@ func (s *Server) convertCachedStatsToDashboardMetrics(cachedStats *postgres.Aggr
 	clientMetrics := make([]metrics.ClientMetric, len(cachedStats.TopClients))
 	for i, client := range cachedStats.TopClients {
 		clientMetrics[i] = metrics.ClientMetric{
-			IP:           client.IP,
-			Requests:     client.Requests,
-			CacheHitRate: client.CacheHitRate,
-			SuccessRate:  client.SuccessRate,
-			LastSeen:     client.LastSeen,
+			IP:          client.IP,
+			Requests:    client.Requests,
+			SuccessRate: client.SuccessRate,
+			LastSeen:    client.LastSeen,
 		}
 	}
 
@@ -524,11 +518,10 @@ func (s *Server) handleClients(w http.ResponseWriter, r *http.Request) {
 	clients := make([]metrics.ClientMetric, len(pgClients))
 	for i, client := range pgClients {
 		clients[i] = metrics.ClientMetric{
-			IP:           client.IP,
-			Requests:     client.Requests,
-			CacheHitRate: client.CacheHitRate,
-			SuccessRate:  client.SuccessRate,
-			LastSeen:     client.LastSeen,
+			IP:          client.IP,
+			Requests:    client.Requests,
+			SuccessRate: client.SuccessRate,
+			LastSeen:    client.LastSeen,
 		}
 	}
 
@@ -1048,7 +1041,6 @@ func (s *Server) handleLogsDocs(w http.ResponseWriter, r *http.Request) {
 					"ip_addresses":      []string{"93.184.216.34"},
 					"status":            "success",
 					"total_duration_ms": 15.2,
-					"cache_hit":         false,
 				},
 			},
 			"total":  1500,
@@ -1080,7 +1072,6 @@ func (s *Server) handleLogsDocs(w http.ResponseWriter, r *http.Request) {
 			"ip_addresses":      "Extracted IP addresses from A/AAAA records",
 			"status":            "Query status (success, error, timeout, etc.)",
 			"total_duration_ms": "Total duration in milliseconds",
-			"cache_hit":         "Whether the response was served from cache",
 		},
 		"search_behavior": map[string]interface{}{
 			"description": "The search term (q parameter) performs case-insensitive pattern matching across:",

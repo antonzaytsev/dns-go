@@ -17,7 +17,6 @@ type DNSLog struct {
 	QueryType           string      `gorm:"type:varchar(10);not null;index"`
 	QueryID             *int        `gorm:"type:integer"`
 	Status              string      `gorm:"type:varchar(50);not null;index"`
-	CacheHit            bool        `gorm:"default:false;index"`
 	DurationMs          *float64    `gorm:"type:double precision"`
 	ResponseUpstream    *string     `gorm:"type:varchar(255);index"`
 	ResponseRcode       *string     `gorm:"type:varchar(10)"`

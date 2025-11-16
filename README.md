@@ -26,8 +26,6 @@ make build
   -upstreams="8.8.8.8:53,1.1.1.1:53,1.0.0.1:53" \
   -log=./logs/dns-requests.log \
   -log-level=info \
-  -cache-size=50000 \
-  -cache-ttl=5m \
   -max-concurrent=200
 ```
 
@@ -46,7 +44,7 @@ docker run -d -p 53:53/udp -v $(pwd)/logs:/logs dns-go
 
 ## Key Features
 
-- **🚀 High Performance**: DNS response caching (~95% fewer upstream queries)
+- **🚀 High Performance**: Concurrent upstream queries for fast resolution
 - **⚡ Concurrent Queries**: Parallel upstream requests for faster failover
 - **🏥 Health Monitoring**: Automatic upstream server health tracking with circuit breaker
 - **📊 Rate Limiting**: Configurable concurrent request limiting
@@ -73,7 +71,7 @@ The DNS server includes a modern web dashboard for real-time monitoring and anal
 - **Health Check**: http://localhost:8080/api/health
 
 ### Dashboard Sections
-1. **Overview Cards**: Total requests, cache hit rate, success rate, response times
+1. **Overview Cards**: Total requests, success rate, response times
 2. **Time Series Charts**: Requests per minute/hour with interactive graphs
 3. **Query Types**: Distribution of DNS query types (A, AAAA, MX, etc.)
 4. **Top Clients**: Most active clients with success rates
@@ -94,10 +92,6 @@ export DNS_LOG_FILE=./logs/dns-requests.log
 
 ```bash
 Usage of ./dns-server:
-  -cache-size int
-        DNS cache size (default 10000)
-  -cache-ttl duration
-        DNS cache TTL (default 5m0s)
   -custom-dns string
         Custom DNS mappings in format: domain1=ip1,domain2=ip2 (e.g., server.local=192.168.0.30)
   -listen string
@@ -145,7 +139,7 @@ The DNS server supports custom local DNS mappings through a configuration file. 
 
 - **File-based Configuration**: Custom mappings loaded from `custom-dns.json`
 - **Automatic Loading**: No restart required when file is added
-- **Priority Resolution**: Custom mappings are resolved before cache and upstream queries
+- **Priority Resolution**: Custom mappings are resolved before upstream queries
 - **IPv4 Support**: Currently supports A record (IPv4) resolution
 - **Domain Normalization**: Automatically handles domains with or without trailing dots
 - **Git Ignored**: Configuration file is automatically ignored by version control
@@ -196,8 +190,6 @@ nslookup server.local 127.0.0.1
 ```bash
 # High-performance setup
 ./dns-server \
-  -cache-size=100000 \
-  -cache-ttl=10m \
   -max-concurrent=500 \
   -timeout=3s \
   -log-level=warn
@@ -206,7 +198,6 @@ nslookup server.local 127.0.0.1
 ./dns-server \
   -port=5353 \
   -log-level=debug \
-  -cache-size=1000
 ```
 
 ### Testing
@@ -216,7 +207,7 @@ dig @localhost google.com
 dig @localhost -p 5353 cloudflare.com AAAA
 
 # Performance test
-time dig @localhost google.com  # Should be fast on second request (cache hit)
+time dig @localhost google.com
 ```
 
 ## Architecture
@@ -227,7 +218,6 @@ dns-go/
 │   ├── dns-server/     # DNS server main application
 │   └── web-dashboard/  # Web dashboard main application
 ├── internal/
-│   ├── cache/          # DNS response caching with TTL
 │   ├── config/         # Configuration management
 │   ├── logging/        # Structured logging
 │   ├── metrics/        # Metrics collection and aggregation
@@ -246,8 +236,6 @@ dns-go/
 ### DNS Caching
 - **Thread-safe**: Concurrent request handling
 - **TTL-aware**: Respects DNS record TTL values
-- **Automatic cleanup**: Background cache maintenance
-- **Configurable**: Adjustable cache size and default TTL
 
 ### Concurrent Upstream Queries
 - **Parallel requests**: Query multiple upstreams simultaneously
@@ -268,10 +256,10 @@ The DNS server creates two separate log files for different purposes:
 
 #### 1. Human-Readable Logs (`dns-server.log`)
 ```
-2025/06/10 16:14:13.345382 [INFO] DNS Proxy Server starting config=map[cache_size:10000 ...]
+2025/06/10 16:14:13.345382 [INFO] DNS Proxy Server starting config=map[...]
 2025/06/10 16:14:13.345530 [INFO] Starting DNS server address=0.0.0.0 port=5053
 2025/06/10 16:14:24.355900 REQ 1ebd3f6b from [::1]:62152: A google.com. -> success via 8.8.8.8:53 (39.51ms)
-2025/06/10 16:14:33.673302 REQ d85e7c92 from [::1]:54813: A google.com. -> CACHE HIT (0.10ms)
+2025/06/10 16:14:33.673302 REQ d85e7c92 from [::1]:54813: A google.com. -> success via 8.8.8.8:53 (12.5ms)
 ```
 
 #### 2. Clean JSON Logs (`dns-requests.log`)
@@ -304,8 +292,6 @@ tail -f logs/dns-server.log
 # Real-time JSON monitoring  
 tail -f logs/dns-requests.log | jq .
 
-# Cache hit rate
-grep -c '"cache_hit":true' logs/dns-requests.log
 
 # Slow queries (>100ms)
 jq 'select(.total_duration_ms > 100)' logs/dns-requests.log
@@ -314,7 +300,6 @@ jq 'select(.total_duration_ms > 100)' logs/dns-requests.log
 jq 'select(.status != "success")' logs/dns-requests.log
 
 # Request pattern analysis
-grep "REQ.*CACHE HIT" logs/dns-server.log | wc -l
 
 # Filter by timestamp (last hour)
 jq --arg hour_ago "$(date -d '1 hour ago' -Iseconds)" 'select(.timestamp > $hour_ago)' logs/dns-requests.log
@@ -339,11 +324,9 @@ make clean         # Clean artifacts
 ### Adding Tests
 ```bash
 # Create test files in internal packages
-internal/cache/cache_test.go
 internal/config/config_test.go
 
 # Run specific package tests
-go test -v ./internal/cache
 ```
 
 ## Production Deployment
@@ -379,7 +362,6 @@ services:
       "./dns-server",
       "-log", "/logs/dns-requests.log",
       "-log-level", "info",
-      "-cache-size", "50000"
     ]
 
   web-dashboard:
@@ -420,7 +402,7 @@ grep "rtt_ms\|total_duration_ms" /var/log/dns-server.log
 - **Go**: Version 1.21 or later
 - **System**: Linux/macOS/Windows
 - **Network**: UDP port 53 (or custom port)
-- **Memory**: ~50MB base + cache size
+- **Memory**: ~50MB base
 - **Permissions**: Root/sudo for port 53
 
 ## Dependencies

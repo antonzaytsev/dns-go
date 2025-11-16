@@ -36,8 +36,6 @@ const Requests: React.FC<RequestsProps> = ({
       case 'success':
       case 'custom_resolution':
         return <CheckCircle className="h-4 w-4 text-green-500" />;
-      case 'cache_hit':
-        return <Database className="h-4 w-4 text-blue-500" />;
       case 'all_upstreams_failed':
       case 'malformed_query':
         return <XCircle className="h-4 w-4 text-red-500" />;
@@ -51,8 +49,6 @@ const Requests: React.FC<RequestsProps> = ({
       case 'success':
       case 'custom_resolution':
         return 'Success';
-      case 'cache_hit':
-        return 'Cache Hit';
       case 'all_upstreams_failed':
         return 'Failed';
       case 'malformed_query':
@@ -67,8 +63,6 @@ const Requests: React.FC<RequestsProps> = ({
       case 'success':
       case 'custom_resolution':
         return 'bg-green-100 text-green-800 border-green-200';
-      case 'cache_hit':
-        return 'bg-blue-100 text-blue-800 border-blue-200';
       case 'all_upstreams_failed':
       case 'malformed_query':
         return 'bg-red-100 text-red-800 border-red-200';
@@ -221,12 +215,7 @@ const Requests: React.FC<RequestsProps> = ({
                     )}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
-                    {request.response?.upstream === 'cache' ? (
-                      <div className="flex items-center space-x-1">
-                        <Database className="h-3 w-3 text-blue-500" />
-                        <span className="text-blue-600 font-medium">Cache</span>
-                      </div>
-                    ) : request.response?.upstream ? (
+                    {request.response?.upstream ? (
                       <div className="flex flex-col">
                         <span className="truncate" title={request.response.upstream}>
                           {request.response.upstream}

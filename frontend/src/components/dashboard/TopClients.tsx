@@ -37,9 +37,6 @@ const TopClients: React.FC<TopClientsProps> = ({ clients }) => {
                 Requests
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Cache Hit Rate
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Success Rate
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -55,19 +52,6 @@ const TopClients: React.FC<TopClientsProps> = ({ clients }) => {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   {formatNumber(client.requests)}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  <div className="flex items-center">
-                    <div className="flex-1 bg-gray-200 rounded-full h-2 mr-2">
-                      <div
-                        className="bg-green-500 h-2 rounded-full"
-                        style={{ width: `${Math.min(client.cache_hit_rate, 100)}%` }}
-                      ></div>
-                    </div>
-                    <span className="text-xs">
-                      {client.cache_hit_rate?.toFixed(1)}%
-                    </span>
-                  </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   <div className="flex items-center">

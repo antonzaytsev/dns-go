@@ -265,15 +265,9 @@ func (l *Logger) LogJSON(data interface{}) {
 }
 
 // LogRequestResponse logs a human-readable version of the DNS request/response
-func (l *Logger) LogRequestResponse(uuid, client, query, qtype, status string, duration float64, cacheHit bool, upstream string) {
-	var msg string
-	if cacheHit {
-		msg = fmt.Sprintf("REQ %s from %s: %s %s -> CACHE HIT (%.2fms)",
-			uuid, client, qtype, query, duration)
-	} else {
-		msg = fmt.Sprintf("REQ %s from %s: %s %s -> %s via %s (%.2fms)",
-			uuid, client, qtype, query, status, upstream, duration)
-	}
+func (l *Logger) LogRequestResponse(uuid, client, query, qtype, status string, duration float64, upstream string) {
+	msg := fmt.Sprintf("REQ %s from %s: %s %s -> %s via %s (%.2fms)",
+		uuid, client, qtype, query, status, upstream, duration)
 
 	if l.humanLogger != nil {
 		l.humanLogger.Println(msg)

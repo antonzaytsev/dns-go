@@ -96,13 +96,6 @@ const OverviewCards: React.FC<OverviewCardsProps> = ({ overview }) => {
       color: 'blue',
     },
     {
-      title: 'Cache Hit Rate',
-      value: `${overview.cache_hit_rate.toFixed(1)}%`,
-      subtitle: 'Cache Performance',
-      icon: Database,
-      color: 'green',
-    },
-    {
       title: 'Success Rate',
       value: `${overview.success_rate.toFixed(1)}%`,
       subtitle: 'Query Success',

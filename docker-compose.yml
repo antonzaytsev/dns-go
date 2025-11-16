@@ -22,8 +22,6 @@ services:
       "-upstreams", "${DNS_UPSTREAMS:-8.8.8.8:53,1.1.1.1:53}",
       "-log", "${DNS_LOG_FILE:-/logs/dns-requests.log}",
       "-log-level", "${DNS_LOG_LEVEL:-info}",
-      "-cache-size", "${DNS_CACHE_SIZE:-10000}",
-      "-cache-ttl", "${DNS_CACHE_TTL:-5m}",
       "-max-concurrent", "${DNS_MAX_CONCURRENT:-100}",
       "-timeout", "${DNS_TIMEOUT:-5s}",
       "-retry-attempts", "${DNS_RETRY_ATTEMPTS:-3}"
