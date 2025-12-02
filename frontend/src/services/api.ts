@@ -8,6 +8,7 @@ import type {
   ClientsResponse,
   APIResponse,
   LogCounts,
+  DomainsResponse,
 } from '../types';
 
 const port: string = process.env.REACT_APP_API_PORT || '8080';
@@ -160,6 +161,33 @@ export const dnsApi = {
       return response.data;
     } catch (error) {
       console.error('Failed to delete DNS mapping:', error);
+      throw error;
+    }
+  },
+
+  // Get domain counts
+  getDomainCounts: async (
+    since: Date | string | null = null,
+    domainFilter: string = ''
+  ): Promise<DomainsResponse> => {
+    try {
+      const params = new URLSearchParams();
+      if (domainFilter) params.append('filter', domainFilter);
+
+      if (since !== null) {
+        let sinceStr: string;
+        if (since instanceof Date) {
+          sinceStr = since.toISOString().replace(/\.\d{3}Z$/, 'Z');
+        } else {
+          sinceStr = since;
+        }
+        params.append('since', sinceStr);
+      }
+
+      const response: AxiosResponse<DomainsResponse> = await api.get(`/api/domains?${params.toString()}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch domain counts:', error);
       throw error;
     }
   },

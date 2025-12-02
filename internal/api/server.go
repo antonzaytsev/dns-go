@@ -117,6 +117,7 @@ func NewServer(cfg Config) (*Server, error) {
 	mux.HandleFunc("/api/metrics", s.handleMetrics)
 	mux.HandleFunc("/api/clients", s.handleClients)
 	mux.HandleFunc("/api/search", s.handleSearch)
+	mux.HandleFunc("/api/domains", s.handleDomains)
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/version", s.handleVersion)
 	mux.HandleFunc("/api/dns-mappings", s.handleDNSMappings)
@@ -147,6 +148,7 @@ func (s *Server) Start() error {
 	fmt.Printf("  🔍 GET /api/metrics      - DNS server metrics and statistics\n")
 	fmt.Printf("  👥 GET /api/clients      - DNS clients and statistics\n")
 	fmt.Printf("  🔎 GET /api/search       - Search through DNS logs\n")
+	fmt.Printf("  🌍 GET /api/domains      - Domain request counts and statistics\n")
 	fmt.Printf("  📚 GET /api/docs/logs    - Logs API documentation\n")
 	fmt.Printf("  ❤️  GET /api/health       - Health check endpoint\n")
 	fmt.Printf("  ℹ️  GET /api/version      - Version and build information\n")
@@ -631,6 +633,65 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, "Failed to encode search results", http.StatusInternalServerError)
+		return
+	}
+}
+
+func (s *Server) handleDomains(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Parse query parameters
+	query := r.URL.Query()
+	sinceStr := query.Get("since")
+	domainFilter := query.Get("filter")
+
+	var since *time.Time
+
+	// Parse and validate since parameter (only format: 2024-01-02T15:04:05Z)
+	if sinceStr != "" {
+		parsedTime, err := time.Parse("2006-01-02T15:04:05Z", sinceStr)
+		if err != nil {
+			http.Error(w, "Invalid since parameter: must be in format 2006-01-02T15:04:05Z", http.StatusBadRequest)
+			return
+		}
+
+		// Validate that the timestamp is not in the future
+		if parsedTime.After(time.Now()) {
+			http.Error(w, "Invalid since parameter: timestamp cannot be in the future", http.StatusBadRequest)
+			return
+		}
+
+		since = &parsedTime
+	}
+
+	// Use PostgreSQL for domain aggregation
+	if s.pgClient == nil {
+		http.Error(w, "Domain aggregation service unavailable: PostgreSQL not connected", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Get domain counts
+	domainCounts, err := s.pgClient.GetDomainCounts(since, domainFilter)
+	if err != nil {
+		fmt.Printf("PostgreSQL domain aggregation failed: %v\n", err)
+		http.Error(w, "Domain aggregation failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"domains": domainCounts,
+		"total":   len(domainCounts),
+		"since":   since,
+		"filter":  domainFilter,
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode domain counts", http.StatusInternalServerError)
 		return
 	}
 }

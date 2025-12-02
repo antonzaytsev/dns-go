@@ -4,6 +4,7 @@ import DashboardPage from './pages/DashboardPage.tsx';
 import DNSMappingsPage from './pages/DNSMappingsPage.tsx';
 import RequestsPage from './pages/RequestsPage.tsx';
 import ClientsPage from './pages/ClientsPage.tsx';
+import DomainsPage from './pages/DomainsPage.tsx';
 import NotFoundPage from './pages/NotFoundPage.tsx';
 import './App.css';
 
@@ -16,6 +17,7 @@ const App: React.FC = () => {
           <Route path="/dns-mappings" element={<DNSMappingsPage />} />
           <Route path="/requests" element={<RequestsPage />} />
           <Route path="/clients" element={<ClientsPage />} />
+          <Route path="/domains" element={<DomainsPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </Router>

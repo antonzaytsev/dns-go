@@ -459,6 +459,75 @@ func (c *Client) GetLogCount() (int64, error) {
 	return count, nil
 }
 
+// DomainCount represents a domain with its request count
+type DomainCount struct {
+	Domain string `json:"domain"`
+	Count  int64  `json:"count"`
+}
+
+// GetDomainCounts returns aggregated domain counts filtered by time range and domain name
+func (c *Client) GetDomainCounts(since *time.Time, domainFilter string) ([]DomainCount, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Get raw database connection for direct sql.Scan
+	sqlDB, err := c.db.WithContext(ctx).DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database connection: %w", err)
+	}
+
+	// Build SQL query with filters
+	var queryBuilder strings.Builder
+	queryBuilder.WriteString(`
+		SELECT 
+			query as domain,
+			COUNT(*)::BIGINT as count
+		FROM dns_logs
+		WHERE 1=1
+	`)
+
+	var args []interface{}
+	argIndex := 1
+
+	// Add time filter if specified
+	if since != nil {
+		queryBuilder.WriteString(fmt.Sprintf(" AND timestamp >= $%d AND timestamp <= $%d", argIndex, argIndex+1))
+		args = append(args, *since, time.Now())
+		argIndex += 2
+	}
+
+	// Add domain name filter if specified
+	if domainFilter != "" {
+		queryBuilder.WriteString(fmt.Sprintf(" AND query ILIKE $%d", argIndex))
+		args = append(args, "%"+domainFilter+"%")
+		argIndex++
+	}
+
+	queryBuilder.WriteString(" GROUP BY query ORDER BY count DESC")
+
+	// Execute raw query
+	rows, err := sqlDB.QueryContext(ctx, queryBuilder.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query domain counts: %w", err)
+	}
+	defer rows.Close()
+
+	var results []DomainCount
+	for rows.Next() {
+		var dc DomainCount
+		if err := rows.Scan(&dc.Domain, &dc.Count); err != nil {
+			return nil, fmt.Errorf("failed to scan domain count: %w", err)
+		}
+		results = append(results, dc)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating domain counts: %w", err)
+	}
+
+	return results, nil
+}
+
 // TimeSeriesPoint represents a time series data point
 // Field names must match SQL column aliases for GORM Raw().Scan() to map correctly
 type TimeSeriesPoint struct {

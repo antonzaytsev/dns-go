@@ -128,6 +128,18 @@ export interface LogCounts {
   postgres: LogCountResponse;
 }
 
+export interface DomainCount {
+  domain: string;
+  count: number;
+}
+
+export interface DomainsResponse {
+  domains: DomainCount[];
+  total: number;
+  since?: string | null;
+  filter?: string;
+}
+
 // ===== COMPONENT PROPS INTERFACES =====
 
 // Using base types for consistency
