@@ -1,8 +1,16 @@
 package upstream
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
+	"encoding/base64"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,20 +27,33 @@ const (
 	StateRecovering
 )
 
+// Protocol represents the DNS protocol type
+type Protocol int
+
+const (
+	ProtocolDNS Protocol = iota // Standard DNS (UDP/TCP)
+	ProtocolDoT                 // DNS over TLS
+	ProtocolDoH                 // DNS over HTTPS
+)
+
 // Server represents an upstream DNS server with health tracking
 type Server struct {
 	Address      string
-	State        int64 // atomic ServerState
-	FailureCount int64 // atomic
-	LastCheck    int64 // atomic time.Unix()
-	LastSuccess  int64 // atomic time.Unix()
-	ResponseTime int64 // atomic time in nanoseconds
+	Protocol     Protocol
+	DoHURL       string // For DoH servers, the full URL
+	State        int64  // atomic ServerState
+	FailureCount int64  // atomic
+	LastCheck    int64  // atomic time.Unix()
+	LastSuccess  int64  // atomic time.Unix()
+	ResponseTime int64  // atomic time in nanoseconds
 }
 
 // Manager handles multiple upstream DNS servers with health checking
 type Manager struct {
 	servers    []*Server
 	client     *dns.Client
+	dotClient  *dns.Client // DNS over TLS client
+	httpClient *http.Client
 	timeout    time.Duration
 	maxRetries int
 
@@ -52,21 +73,113 @@ type QueryResult struct {
 	Error    error
 }
 
+// parseUpstreamAddress parses an upstream address and determines the protocol
+func parseUpstreamAddress(addr string) (protocol Protocol, address string, dohURL string, err error) {
+	addr = strings.TrimSpace(addr)
+
+	// Check for DoH URL (https://)
+	if strings.HasPrefix(addr, "https://") {
+		protocol = ProtocolDoH
+		parsedURL, err := url.Parse(addr)
+		if err != nil {
+			return ProtocolDNS, "", "", fmt.Errorf("invalid DoH URL: %w", err)
+		}
+		// Ensure path ends with /dns-query if not specified
+		if parsedURL.Path == "" || parsedURL.Path == "/" {
+			parsedURL.Path = "/dns-query"
+		}
+		dohURL = parsedURL.String()
+		address = parsedURL.Host
+		return protocol, address, dohURL, nil
+	}
+
+	// Check for DoT (tls:// or dot://)
+	if strings.HasPrefix(addr, "tls://") || strings.HasPrefix(addr, "dot://") {
+		protocol = ProtocolDoT
+		address = strings.TrimPrefix(strings.TrimPrefix(addr, "tls://"), "dot://")
+		// Ensure port is specified (default to 853 for DoT)
+		if !strings.Contains(address, ":") {
+			address = net.JoinHostPort(address, "853")
+		}
+		return protocol, address, "", nil
+	}
+
+	// Check for explicit doh:// prefix
+	if strings.HasPrefix(addr, "doh://") {
+		protocol = ProtocolDoH
+		// Convert doh:// to https://
+		httpsURL := strings.Replace(addr, "doh://", "https://", 1)
+		parsedURL, err := url.Parse(httpsURL)
+		if err != nil {
+			return ProtocolDNS, "", "", fmt.Errorf("invalid DoH URL: %w", err)
+		}
+		if parsedURL.Path == "" || parsedURL.Path == "/" {
+			parsedURL.Path = "/dns-query"
+		}
+		dohURL = parsedURL.String()
+		address = parsedURL.Host
+		return protocol, address, dohURL, nil
+	}
+
+	// Default to standard DNS
+	protocol = ProtocolDNS
+	address = addr
+	// Ensure port is specified (default to 53 for DNS)
+	if !strings.Contains(address, ":") {
+		address = net.JoinHostPort(address, "53")
+	}
+	return protocol, address, "", nil
+}
+
 // New creates a new upstream manager
 func New(addresses []string, timeout time.Duration, maxRetries int) *Manager {
-	servers := make([]*Server, len(addresses))
-	for i, addr := range addresses {
-		servers[i] = &Server{
-			Address:     addr,
+	servers := make([]*Server, 0, len(addresses))
+	for _, addr := range addresses {
+		protocol, address, dohURL, err := parseUpstreamAddress(addr)
+		if err != nil {
+			// Log error but continue with other servers
+			continue
+		}
+
+		server := &Server{
+			Address:     address,
+			Protocol:    protocol,
+			DoHURL:      dohURL,
 			State:       int64(StateHealthy),
 			LastCheck:   time.Now().Unix(),
 			LastSuccess: time.Now().Unix(),
 		}
+		servers = append(servers, server)
+	}
+
+	// Create DNS client for standard DNS
+	dnsClient := &dns.Client{Timeout: timeout}
+
+	// Create DoT client with TLS config
+	dotClient := &dns.Client{
+		Net:     "tcp-tls",
+		Timeout: timeout,
+		TLSConfig: &tls.Config{
+			ServerName:         "",
+			InsecureSkipVerify: false,
+		},
+	}
+
+	// Create HTTP client for DoH
+	httpClient := &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: false,
+			},
+		},
 	}
 
 	return &Manager{
 		servers:          servers,
-		client:           &dns.Client{Timeout: timeout},
+		client:           dnsClient,
+		dotClient:        dotClient,
+		httpClient:       httpClient,
 		timeout:          timeout,
 		maxRetries:       maxRetries,
 		failureThreshold: 3,
@@ -113,7 +226,7 @@ func (m *Manager) QueryConcurrent(ctx context.Context, msg *dns.Msg) (*QueryResu
 		}(server)
 	}
 
-	// Wait for first successful response or all failures
+	// Close channel when all queries complete
 	go func() {
 		wg.Wait()
 		close(resultChan)
@@ -122,12 +235,15 @@ func (m *Manager) QueryConcurrent(ctx context.Context, msg *dns.Msg) (*QueryResu
 	var firstSuccess *QueryResult
 	var allResults []QueryResult
 
+	// Process results as they arrive, return immediately on first success
 	for result := range resultChan {
 		allResults = append(allResults, result)
 
 		if result.Error == nil && firstSuccess == nil {
 			firstSuccess = &result
-			// Don't return immediately, collect all results for logging
+			// Return immediately on first success to avoid waiting for slower upstreams
+			// Remaining results will continue to be collected in background for logging
+			break
 		}
 	}
 
@@ -148,14 +264,35 @@ func (m *Manager) QueryConcurrent(ctx context.Context, msg *dns.Msg) (*QueryResu
 // querySingle performs a single DNS query to an upstream server
 func (m *Manager) querySingle(ctx context.Context, server *Server, msg *dns.Msg) QueryResult {
 	start := time.Now()
+	var resp *dns.Msg
+	var rtt time.Duration
+	var err error
 
-	resp, rtt, err := m.client.ExchangeContext(ctx, msg, server.Address)
+	switch server.Protocol {
+	case ProtocolDoH:
+		resp, rtt, err = m.queryDoH(ctx, server, msg)
+	case ProtocolDoT:
+		resp, rtt, err = m.queryDoT(ctx, server, msg)
+	case ProtocolDNS:
+		fallthrough
+	default:
+		resp, rtt, err = m.client.ExchangeContext(ctx, msg, server.Address)
+	}
+
 	duration := time.Since(start)
+	if rtt == 0 {
+		rtt = duration
+	}
+
+	displayAddr := server.Address
+	if server.Protocol == ProtocolDoH && server.DoHURL != "" {
+		displayAddr = server.DoHURL
+	}
 
 	result := QueryResult{
 		Response: resp,
 		RTT:      rtt,
-		Server:   server.Address,
+		Server:   displayAddr,
 		Error:    err,
 	}
 
@@ -167,6 +304,138 @@ func (m *Manager) querySingle(ctx context.Context, server *Server, msg *dns.Msg)
 	}
 
 	return result
+}
+
+// queryDoT performs a DNS over TLS query
+func (m *Manager) queryDoT(ctx context.Context, server *Server, msg *dns.Msg) (*dns.Msg, time.Duration, error) {
+	// Extract hostname for TLS SNI
+	host, _, err := net.SplitHostPort(server.Address)
+	if err != nil {
+		return nil, 0, fmt.Errorf("invalid DoT address: %w", err)
+	}
+
+	// Create a DoT client with proper SNI configuration
+	dotClient := &dns.Client{
+		Net:     "tcp-tls",
+		Timeout: m.timeout,
+		TLSConfig: &tls.Config{
+			ServerName:         host,
+			InsecureSkipVerify: false,
+		},
+	}
+
+	return dotClient.ExchangeContext(ctx, msg, server.Address)
+}
+
+// queryDoH performs a DNS over HTTPS query (tries POST first, then GET as fallback)
+func (m *Manager) queryDoH(ctx context.Context, server *Server, msg *dns.Msg) (*dns.Msg, time.Duration, error) {
+	if server.DoHURL == "" {
+		return nil, 0, fmt.Errorf("DoH URL not configured")
+	}
+
+	// Pack DNS message
+	packed, err := msg.Pack()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to pack DNS message: %w", err)
+	}
+
+	// Try POST first (RFC 8484 standard)
+	resp, rtt, err := m.queryDoHPost(ctx, server.DoHURL, packed)
+	if err == nil {
+		return resp, rtt, nil
+	}
+
+	// Fallback to GET if POST fails
+	return m.queryDoHGet(ctx, server.DoHURL, packed)
+}
+
+// queryDoHPost performs a DNS over HTTPS query using POST method
+func (m *Manager) queryDoHPost(ctx context.Context, dohURL string, packed []byte) (*dns.Msg, time.Duration, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", dohURL, bytes.NewReader(packed))
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/dns-message")
+	req.Header.Set("Accept", "application/dns-message")
+
+	start := time.Now()
+	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		return nil, time.Since(start), fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		rtt := time.Since(start)
+		return nil, rtt, fmt.Errorf("HTTP error: %d %s", resp.StatusCode, resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		rtt := time.Since(start)
+		return nil, rtt, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	dnsResp := new(dns.Msg)
+	if err := dnsResp.Unpack(body); err != nil {
+		rtt := time.Since(start)
+		return nil, rtt, fmt.Errorf("failed to unpack DNS response: %w", err)
+	}
+
+	rtt := time.Since(start)
+	return dnsResp, rtt, nil
+}
+
+// queryDoHGet performs a DNS over HTTPS query using GET method (RFC 8484)
+func (m *Manager) queryDoHGet(ctx context.Context, dohURL string, packed []byte) (*dns.Msg, time.Duration, error) {
+	// Base64url encode the DNS message
+	encoded := base64.RawURLEncoding.EncodeToString(packed)
+
+	// Parse URL and add dns parameter
+	parsedURL, err := url.Parse(dohURL)
+	if err != nil {
+		return nil, 0, fmt.Errorf("invalid DoH URL: %w", err)
+	}
+
+	// Add dns parameter for GET request
+	params := parsedURL.Query()
+	params.Set("dns", encoded)
+	parsedURL.RawQuery = params.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", parsedURL.String(), nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/dns-message")
+
+	start := time.Now()
+	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		return nil, time.Since(start), fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		rtt := time.Since(start)
+		return nil, rtt, fmt.Errorf("HTTP error: %d %s", resp.StatusCode, resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		rtt := time.Since(start)
+		return nil, rtt, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	dnsResp := new(dns.Msg)
+	if err := dnsResp.Unpack(body); err != nil {
+		rtt := time.Since(start)
+		return nil, rtt, fmt.Errorf("failed to unpack DNS response: %w", err)
+	}
+
+	rtt := time.Since(start)
+	return dnsResp, rtt, nil
 }
 
 // recordSuccess updates server state after a successful query

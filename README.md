@@ -42,10 +42,96 @@ docker build -t dns-go .
 docker run -d -p 53:53/udp -v $(pwd)/logs:/logs dns-go
 ```
 
+### Docker with Secure DNS (DoH/DoT)
+
+#### Using Docker Compose with DoH
+```bash
+# Set DNS_UPSTREAMS environment variable for secure DNS
+DNS_UPSTREAMS="https://dns.google/dns-query,https://cloudflare-dns.com/dns-query" docker-compose up -d dns-server
+
+# Or create/edit .env file:
+echo 'DNS_UPSTREAMS=https://dns.google/dns-query,https://cloudflare-dns.com/dns-query' >> .env
+docker-compose up -d dns-server
+```
+
+#### Using Docker Run with DoH
+```bash
+# Build the image
+docker build -t dns-go .
+
+# Run with Google DoH
+docker run -d \
+  --name dns-server \
+  -p 53:53/udp \
+  -v $(pwd)/logs:/logs \
+  dns-go \
+  ./dns-server \
+    -listen=0.0.0.0 \
+    -port=53 \
+    -upstreams="https://dns.google/dns-query" \
+    -log=/logs/dns-requests.log \
+    -log-level=info
+
+# Run with multiple DoH providers (Cloudflare + Google)
+docker run -d \
+  --name dns-server \
+  -p 53:53/udp \
+  -v $(pwd)/logs:/logs \
+  dns-go \
+  ./dns-server \
+    -listen=0.0.0.0 \
+    -port=53 \
+    -upstreams="https://cloudflare-dns.com/dns-query,https://dns.google/dns-query" \
+    -log=/logs/dns-requests.log \
+    -log-level=info
+
+# Run with DoT (DNS over TLS)
+docker run -d \
+  --name dns-server \
+  -p 53:53/udp \
+  -v $(pwd)/logs:/logs \
+  dns-go \
+  ./dns-server \
+    -listen=0.0.0.0 \
+    -port=53 \
+    -upstreams="tls://1.1.1.1:853,tls://8.8.8.8:853" \
+    -log=/logs/dns-requests.log \
+    -log-level=info
+
+# Run with mixed secure and standard DNS (secure first, fallback to standard)
+docker run -d \
+  --name dns-server \
+  -p 53:53/udp \
+  -v $(pwd)/logs:/logs \
+  dns-go \
+  ./dns-server \
+    -listen=0.0.0.0 \
+    -port=53 \
+    -upstreams="https://dns.google/dns-query,tls://1.1.1.1:853,8.8.8.8:53" \
+    -log=/logs/dns-requests.log \
+    -log-level=info
+```
+
+#### Testing Docker DNS Server
+```bash
+# Test DNS resolution (replace 127.0.0.1 with your Docker host IP if needed)
+dig @127.0.0.1 google.com
+
+# Test with specific port if using non-standard port
+dig @127.0.0.1 -p 5353 google.com
+
+# Check container logs
+docker logs dns-server
+
+# Follow logs in real-time
+docker logs -f dns-server
+```
+
 ## Key Features
 
 - **🚀 High Performance**: Concurrent upstream queries for fast resolution
 - **⚡ Concurrent Queries**: Parallel upstream requests for faster failover
+- **🔒 Secure DNS**: Support for DNS over HTTPS (DoH) and DNS over TLS (DoT) to prevent interception
 - **🏥 Health Monitoring**: Automatic upstream server health tracking with circuit breaker
 - **📊 Rate Limiting**: Configurable concurrent request limiting
 - **🔍 Dual Logging**: Clean JSON logs for analysis + human-readable logs for monitoring
@@ -110,6 +196,10 @@ Usage of ./dns-server:
         Upstream server timeout (default 5s)
   -upstreams string
         Comma-separated list of upstream DNS servers (default "8.8.8.8:53,1.1.1.1:53")
+        Supports standard DNS, DNS over TLS (DoT), and DNS over HTTPS (DoH):
+        - Standard DNS: 8.8.8.8:53 or 1.1.1.1:53
+        - DNS over TLS: tls://1.1.1.1:853 or dot://8.8.8.8:853
+        - DNS over HTTPS: https://cloudflare-dns.com/dns-query or doh://dns.google/dns-query
 ```
 
 ### Custom DNS Configuration
@@ -172,6 +262,56 @@ nslookup server.local 127.0.0.1
 
 **Note**: Custom DNS configuration file (`custom-dns.json`) takes precedence over command-line mappings.
 
+### Secure DNS Support
+
+The DNS server supports secure DNS protocols to prevent interception by ISPs or other network providers:
+
+#### DNS over HTTPS (DoH)
+DoH encrypts DNS queries using HTTPS, making them indistinguishable from regular web traffic.
+
+```bash
+# Use Cloudflare DoH
+./dns-server -upstreams="https://cloudflare-dns.com/dns-query"
+
+# Use Google DoH
+./dns-server -upstreams="https://dns.google/dns-query"
+
+# Use Quad9 DoH
+./dns-server -upstreams="https://dns.quad9.net/dns-query"
+
+# Alternative doh:// prefix
+./dns-server -upstreams="doh://cloudflare-dns.com/dns-query"
+```
+
+#### DNS over TLS (DoT)
+DoT encrypts DNS queries using TLS on port 853.
+
+```bash
+# Use Cloudflare DoT
+./dns-server -upstreams="tls://1.1.1.1:853"
+
+# Use Google DoT
+./dns-server -upstreams="tls://8.8.8.8:853"
+
+# Alternative dot:// prefix
+./dns-server -upstreams="dot://1.1.1.1:853"
+```
+
+#### Mixed Configuration
+You can mix secure and standard DNS servers. The server will try secure servers first if configured:
+
+```bash
+# Secure DoH/DoT with standard DNS fallback
+./dns-server \
+  -upstreams="https://cloudflare-dns.com/dns-query,tls://1.1.1.1:853,8.8.8.8:53"
+```
+
+#### Benefits of Secure DNS
+- **Privacy**: DNS queries are encrypted and cannot be intercepted
+- **Security**: Prevents DNS hijacking and man-in-the-middle attacks
+- **Censorship Resistance**: Queries appear as regular HTTPS traffic
+- **Provider Independence**: ISPs cannot monitor or log your DNS queries
+
 ## Usage Examples
 
 ### Basic Usage
@@ -198,6 +338,15 @@ nslookup server.local 127.0.0.1
 ./dns-server \
   -port=5353 \
   -log-level=debug \
+
+# Secure DNS with DoH and DoT
+./dns-server \
+  -upstreams="https://cloudflare-dns.com/dns-query,https://dns.google/dns-query" \
+  -log-level=info
+
+# Mixed secure and standard DNS
+./dns-server \
+  -upstreams="tls://1.1.1.1:853,https://dns.quad9.net/dns-query,8.8.8.8:53"
 ```
 
 ### Testing
