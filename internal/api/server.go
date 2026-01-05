@@ -100,12 +100,21 @@ func NewServer(cfg Config) (*Server, error) {
 		port:       cfg.Port,
 	}
 
-	// Initialize and start background aggregation scheduler if PostgreSQL is available
+	// Initialize and start background scheduler if PostgreSQL is available
 	if pgClient != nil {
 		s.scheduler = aggregation.NewScheduler(pgClient)
+
+		// Configure retention days from environment variable
+		if retentionStr := os.Getenv("LOG_RETENTION_DAYS"); retentionStr != "" {
+			if days, err := strconv.Atoi(retentionStr); err == nil && days > 0 {
+				s.scheduler.SetRetentionDays(days)
+				fmt.Printf("📋 Log retention period set to %d days\n", days)
+			}
+		}
+
 		go func() {
 			if err := s.scheduler.Start(); err != nil {
-				fmt.Printf("⚠️  Warning: Failed to start aggregation scheduler: %v\n", err)
+				fmt.Printf("⚠️  Warning: Failed to start background scheduler: %v\n", err)
 			}
 		}()
 	}

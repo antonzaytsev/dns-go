@@ -457,6 +457,24 @@ func (c *Client) GetLogCount() (int64, error) {
 	return count, nil
 }
 
+// DeleteOldLogs deletes DNS logs older than the specified retention period
+func (c *Client) DeleteOldLogs(retentionDays int) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	cutoffTime := time.Now().AddDate(0, 0, -retentionDays)
+
+	result := c.db.WithContext(ctx).
+		Where("timestamp < ?", cutoffTime).
+		Delete(&DNSLog{})
+
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to delete old logs: %w", result.Error)
+	}
+
+	return result.RowsAffected, nil
+}
+
 // DomainCount represents a domain with its request count
 type DomainCount struct {
 	Domain string `json:"domain"`
