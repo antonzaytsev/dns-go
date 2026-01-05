@@ -95,8 +95,8 @@ export const useRequests = (refreshInterval: number = 5000): UseRequestsReturn =
   const fetchRequests = useCallback(async (): Promise<void> => {
     try {
       setError(null);
-      // Load last 50 requests using empty search query
-      const data: SearchResponse = await dnsApi.searchLogs('', 50, 0);
+      // Load last 50 requests with no filters
+      const data: SearchResponse = await dnsApi.searchLogs('', '', 50, 0);
       setRequests(data.results || []);
       setLastUpdated(new Date());
       setLoading(false);

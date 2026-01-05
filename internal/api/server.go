@@ -568,7 +568,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	// Parse query parameters
 	query := r.URL.Query()
-	searchTerm := query.Get("q")
+	domain := query.Get("domain")
+	clientIP := query.Get("client")
 	limitStr := query.Get("limit")
 	offsetStr := query.Get("offset")
 	sinceStr := query.Get("since")
@@ -614,7 +615,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Search in PostgreSQL
-	searchResult, err := s.pgClient.SearchLogs(searchTerm, limit, offset, since)
+	searchResult, err := s.pgClient.SearchLogs(domain, clientIP, limit, offset, since)
 	if err != nil {
 		fmt.Printf("PostgreSQL search failed: %v\n", err)
 		http.Error(w, "Search failed: "+err.Error(), http.StatusInternalServerError)
@@ -626,7 +627,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		"total":   searchResult.Total,
 		"limit":   limit,
 		"offset":  offset,
-		"query":   searchTerm,
+		"domain":  domain,
+		"client":  clientIP,
 		"since":   since,
 		"source":  "postgres",
 	}

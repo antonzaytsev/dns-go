@@ -397,24 +397,22 @@ type SearchResult struct {
 }
 
 // SearchLogs searches DNS logs with pagination and optional filters
-func (c *Client) SearchLogs(searchTerm string, limit, offset int, since *time.Time) (*SearchResult, error) {
+func (c *Client) SearchLogs(domain, clientIP string, limit, offset int, since *time.Time) (*SearchResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	query := c.db.WithContext(ctx).Model(&DNSLog{})
 
-	// Build WHERE conditions based on search term
-	if searchTerm != "" {
-		searchPattern := "%" + searchTerm + "%"
-		query = query.Where(
-			"query ILIKE ? OR client_ip::text ILIKE ? OR query_type ILIKE ? OR status ILIKE ? OR response_upstream ILIKE ? OR uuid = ?",
-			searchPattern, searchPattern, searchPattern, searchPattern, searchPattern, searchTerm,
-		)
+	// Add domain filter if specified
+	if domain != "" {
+		domainPattern := "%" + domain + "%"
+		query = query.Where("query ILIKE ?", domainPattern)
+	}
 
-		// Add IP address array search if search term looks like IP
-		if strings.Contains(searchTerm, ".") || (len(searchTerm) > 0 && searchTerm[0] >= '0' && searchTerm[0] <= '9') {
-			query = query.Or("EXISTS (SELECT 1 FROM unnest(ip_addresses) AS ip WHERE ip::text ILIKE ?)", searchPattern)
-		}
+	// Add client IP filter if specified
+	if clientIP != "" {
+		clientPattern := "%" + clientIP + "%"
+		query = query.Where("client_ip::text ILIKE ?", clientPattern)
 	}
 
 	// Add time filter if specified
@@ -886,7 +884,7 @@ func (c *Client) GetOverviewStats() (*OverviewStats, error) {
 
 // GetRecentRequests returns recent requests for display
 func (c *Client) GetRecentRequests(limit int) ([]types.LogEntry, error) {
-	result, err := c.SearchLogs("", limit, 0, nil)
+	result, err := c.SearchLogs("", "", limit, 0, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -103,14 +103,16 @@ export const dnsApi = {
 
   // Search DNS logs
   searchLogs: async (
-    searchTerm: string,
+    domain: string = '',
+    clientIP: string = '',
     limit: number = 100,
     offset: number = 0,
     since: Date | string | null = null
   ): Promise<SearchResponse> => {
     try {
       const params = new URLSearchParams();
-      if (searchTerm) params.append('q', searchTerm);
+      if (domain) params.append('domain', domain);
+      if (clientIP) params.append('client', clientIP);
       params.append('limit', limit.toString());
       params.append('offset', offset.toString());
 
