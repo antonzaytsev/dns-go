@@ -169,12 +169,14 @@ export const dnsApi = {
 
   // Get domain counts
   getDomainCounts: async (
-    since: Date | string | null = null,
-    domainFilter: string = ''
+    domainFilter: string = '',
+    clientIP: string = '',
+    since: Date | string | null = null
   ): Promise<DomainsResponse> => {
     try {
       const params = new URLSearchParams();
-      if (domainFilter) params.append('filter', domainFilter);
+      if (domainFilter) params.append('domain', domainFilter);
+      if (clientIP) params.append('client', clientIP);
 
       if (since !== null) {
         let sinceStr: string;

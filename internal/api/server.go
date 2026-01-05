@@ -659,7 +659,8 @@ func (s *Server) handleDomains(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters
 	query := r.URL.Query()
 	sinceStr := query.Get("since")
-	domainFilter := query.Get("filter")
+	domainFilter := query.Get("domain")
+	clientIP := query.Get("client")
 
 	var since *time.Time
 
@@ -687,7 +688,7 @@ func (s *Server) handleDomains(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get domain counts
-	domainCounts, err := s.pgClient.GetDomainCounts(since, domainFilter)
+	domainCounts, err := s.pgClient.GetDomainCounts(since, domainFilter, clientIP)
 	if err != nil {
 		fmt.Printf("PostgreSQL domain aggregation failed: %v\n", err)
 		http.Error(w, "Domain aggregation failed: "+err.Error(), http.StatusInternalServerError)

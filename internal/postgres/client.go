@@ -481,8 +481,8 @@ type DomainCount struct {
 	Count  int64  `json:"count"`
 }
 
-// GetDomainCounts returns aggregated domain counts filtered by time range and domain name
-func (c *Client) GetDomainCounts(since *time.Time, domainFilter string) ([]DomainCount, error) {
+// GetDomainCounts returns aggregated domain counts filtered by time range, domain name, and client IP
+func (c *Client) GetDomainCounts(since *time.Time, domainFilter, clientIP string) ([]DomainCount, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -516,6 +516,13 @@ func (c *Client) GetDomainCounts(since *time.Time, domainFilter string) ([]Domai
 	if domainFilter != "" {
 		queryBuilder.WriteString(fmt.Sprintf(" AND query ILIKE $%d", argIndex))
 		args = append(args, "%"+domainFilter+"%")
+		argIndex++
+	}
+
+	// Add client IP filter if specified
+	if clientIP != "" {
+		queryBuilder.WriteString(fmt.Sprintf(" AND client_ip::text ILIKE $%d", argIndex))
+		args = append(args, "%"+clientIP+"%")
 		argIndex++
 	}
 
