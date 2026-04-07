@@ -33,8 +33,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # Production stage
 FROM alpine:latest AS production
 
-# Install ca-certificates, timezone data, and wget for health checks
-RUN apk --no-cache add ca-certificates tzdata wget \
+# Install ca-certificates, timezone data, wget for health checks, and su-exec for entrypoint
+RUN apk --no-cache add ca-certificates tzdata wget su-exec \
     && addgroup -g 1000 -S dns \
     && adduser -u 1000 -S dns -G dns
 
@@ -49,11 +49,14 @@ COPY --from=builder /app/dns-server .
 # Copy custom DNS configuration if it exists
 COPY --from=builder /app/custom-dns.json* ./
 
+# Copy entrypoint script
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # Change ownership to non-root user
 RUN chown dns:dns /app/dns-server /app/custom-dns.json* 2>/dev/null || chown dns:dns /app/dns-server
 
-# Switch to non-root user
-USER dns
+ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Health check (default for DNS server)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \

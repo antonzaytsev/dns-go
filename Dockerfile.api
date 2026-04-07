@@ -33,8 +33,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # Production stage
 FROM alpine:latest AS production
 
-# Install ca-certificates and timezone data
-RUN apk --no-cache add ca-certificates tzdata \
+# Install ca-certificates, timezone data, and su-exec for entrypoint
+RUN apk --no-cache add ca-certificates tzdata su-exec \
     && addgroup -g 1000 -S dns \
     && adduser -u 1000 -S dns -G dns
 
@@ -46,11 +46,14 @@ WORKDIR /app
 # Copy the API server binary from builder stage
 COPY --from=builder /app/api-server .
 
+# Copy entrypoint script
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # Change ownership to non-root user
 RUN chown dns:dns /app/api-server
 
-# Switch to non-root user
-USER dns
+ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
